@@ -76,11 +76,11 @@ class sgd:
         self.w[1:, ] = self.w[1:, ] * self.reg_term - self.lr * gradient[1:, ]
 
     @staticmethod
-    def shuffle_data(X, y):
-        combined = zip(X, y)
-        random.shuffle(combined)
-        X[:], y[:] = zip(*combined)
-        return X, y
+    def shuffle_data(a, b):
+        rng_state = np.random.get_state()
+        np.random.shuffle(a)
+        np.random.set_state(rng_state)
+        np.random.shuffle(b)
 
     def fit(self, X, y):
         start_time = time.time()
@@ -88,8 +88,8 @@ class sgd:
         n = len(X)
         self.initialize_weights(m)
         for _ in xrange(self.epochs):
-            # Kind of ugly randomness, but all i care about is learning
-            X, y = self.shuffle_data(X, y)
+            # Kind of ugly but all i care about is learning
+            self.shuffle_data(X, y)
 
             # Create an iterator
             x_iter = self.batch(X, self.batch_size)
@@ -101,7 +101,7 @@ class sgd:
                 cost = self.compute_cost(loss, n)
                 gradient = self.compute_gradient(X_batch, loss)
                 self.update_weights(gradient)
-                #print cost
+                # print cost
 
         print 'elapsed time in training: %f' % (time.time() - start_time)
 
