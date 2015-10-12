@@ -77,10 +77,13 @@ class sgd:
 
     @staticmethod
     def shuffle_data(a, b):
-        rng_state = np.random.get_state()
-        np.random.shuffle(a)
-        np.random.set_state(rng_state)
-        np.random.shuffle(b)
+        #rng_state = np.random.get_state()
+        #np.random.shuffle(a)
+        #np.random.set_state(rng_state)
+        #np.random.shuffle(b)
+        assert len(a) == len(b)
+        p = np.random.permutation(len(a))
+        return a[p], b[p]
 
     def fit(self, X, y):
         start_time = time.time()
@@ -89,7 +92,7 @@ class sgd:
         self.initialize_weights(m)
         for _ in xrange(self.epochs):
             # Kind of ugly but all i care about is learning
-            self.shuffle_data(X, y)
+            X, y = self.shuffle_data(X, y)
 
             # Create an iterator
             x_iter = self.batch(X, self.batch_size)
