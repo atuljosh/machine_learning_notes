@@ -1,5 +1,3 @@
-__author__ = 'atul'
-
 from itertools import izip
 import numpy as np
 from sklearn.metrics import mean_squared_error, roc_auc_score
@@ -7,16 +5,19 @@ import time
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.preprocessing import add_dummy_feature
 from sklearn.cross_validation import train_test_split
+from sklearn.linear_model import LinearRegression, LogisticRegression
 
 """
 Things to do:
 
 1) Add pairwise interactions
 2) introduce fm formulation
-3) may be comparison with scikit learn's native models (logistic case seems messed up)
+3) may be comparison with scikit learn's native models - done
+4) recheck logistic case
 """
 
-class sgd:
+
+class SimpleSGD(object):
     """
     Very simple sgd
     """
@@ -33,6 +34,8 @@ class sgd:
 
         # Save model
         self.w = None
+        self.intercept_ = None
+        self.coef_ = None
 
     @staticmethod
     def sigmoid(hypothesis):
@@ -81,7 +84,7 @@ class sgd:
 
     def initialize_weights(self, m):
         # np.random.random((x.columns,))
-        self.w = np.ones(m, order='C')
+        self.w = np.random.random((m))
 
     def update_weights(self, gradient):
         # Either do not regularize intercept OR regularize to global mean
@@ -96,11 +99,15 @@ class sgd:
 
     def fit(self, X, y):
         start_time = time.time()
+
+        # Add intercept
+        X = add_dummy_feature(X)
         m = len(X[0])
         n = len(X)
         self.initialize_weights(m)
         for _ in xrange(self.epochs):
-            # Kind of ugly but all i care about is learning
+
+            # Kind of ugly and slow but all i care about is learning
             X, y = self.shuffle_data(X, y)
 
             # Create an iterator
@@ -111,15 +118,20 @@ class sgd:
                 hypothesis = self.compute_hypothesis(X_batch)
 
                 # Compute cost for entire dataset
-                cost = self.compute_cost(X, y)
-                print cost
+                # cost = self.compute_cost(X, y)
+                # print cost
 
                 gradient = self.compute_gradient(X_batch, y_batch, hypothesis)
                 self.update_weights(gradient)
 
+        # Save model params for scikit compatibility
+        self.intercept_ = self.w[0]
+        self.coeff_ = self.w[1:, ]
+
         print 'elapsed time in training: %f' % (time.time() - start_time)
 
     def predict(self, X, return_labels=False):
+        X = add_dummy_feature(X)  # Add intercept
         hypothesis = self.compute_hypothesis(X)
         if self.loss_fn == 'logistic':
             if return_labels:
@@ -131,36 +143,52 @@ class sgd:
         elif self.loss_fn == 'squared':
             return hypothesis
 
-def synthetic_data(N, loss_fn, pairwise_interactions=False):
+
+def synthetic_data(N, loss_fn):
     if loss_fn == 'squared':
         response = np.random.normal(loc=0.1, scale=1, size=N)
     elif loss_fn == 'logistic':
-        response = np.random.binomial(n=1, p=0.2, size=N)
+        response = np.random.binomial(n=1, p=0.4, size=N)
 
-    dm_raw=[{
-            'country': np.random.choice(['US', 'UK', 'CA'],p=[0.8,0.1,0.1]),
-            'gender': np.random.choice(['M', 'F'],p=[0.3, 0.7]),
-            'bid_type': np.random.choice(['cpc', 'cpm', 'ocpm'], p=[0.2,0.1,0.7])}
-        for _ in xrange(N)]
+    dm_raw = [{
+                  'country': np.random.choice(['US', 'UK', 'CA'], p=[0.8, 0.1, 0.1]),
+                  'gender': np.random.choice(['M', 'F'], p=[0.3, 0.7]),
+                  'bid_type': np.random.choice(['cpc', 'cpm', 'ocpm'], p=[0.2, 0.1, 0.7])}
+              for _ in xrange(N)]
 
     vec = DictVectorizer()
     X = vec.fit_transform(dm_raw).toarray()
-    X = add_dummy_feature(X) # Add intercept
 
     return response, X
 
 
-if __name__ == "__main__":
-    loss_fn = 'squared'
-    y_train, X_train = synthetic_data(1000, loss_fn)
-    # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42)
-    params_dict = {'loss_fn': loss_fn, 'learning_rate': 0.01, 'l2_regularization': 0, 'batch_size': 10, 'epochs': 10}
-    sgd = sgd(params_dict)
-    sgd.fit(X_train, y_train)
-
-    y_hat = sgd.predict(X_train, True)
+def test_model(lm, loss_fn, X_train, y_train, X_test, y_test):
+    lm.fit(X_train, y_train)
+    y_hat = lm.predict(X_test)
 
     if loss_fn == 'squared':
-        print "mean squared error on test" + str(mean_squared_error(y_train, y_hat))
+        print "mean squared error on test: " + str(mean_squared_error(y_test, y_hat))
     elif loss_fn == 'logistic':
-        print "roc_auc_score on test set" + str(roc_auc_score(y_train, y_hat))
+        print "roc_auc_score on test set: " + str(roc_auc_score(y_test, y_hat))
+
+    return y_hat, lm.intercept_, lm.coef_
+
+
+if __name__ == "__main__":
+    loss_fn = 'squared'
+    y, X = synthetic_data(1000, loss_fn)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42)
+    params_dict = {'loss_fn': loss_fn, 'learning_rate': 0.001, 'l2_regularization': 0.01, 'batch_size': 1, 'epochs': 100}
+    our_sgd = SimpleSGD(params_dict)
+
+    print "our model:"
+    y_hat, intercept, coeff = test_model(our_sgd, loss_fn, X_train, y_train, X_test, y_test)
+
+    # Scikit learn
+    if loss_fn == 'squared':
+        scikit_model = LinearRegression()
+    elif loss_fn == 'logistic':
+        scikit_model = LogisticRegression()
+
+    print "Scikit Learn"
+    y_hat, intercept, coeff = test_model(scikit_model, loss_fn, X_train, y_train, X_test, y_test)
