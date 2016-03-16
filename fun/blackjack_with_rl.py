@@ -1,23 +1,17 @@
 import random
+import numpy as np
+from sklearn.linear_model import SGDRegressor, SGDClassifier
+from sklearn.feature_extraction import DictVectorizer
+import pandas as pd
+from sklearn.feature_extraction import FeatureHasher
 
-
-# Implementation based loosely on: http://outlace.com/Reinforcement-Learning-Part-2/ &
-# https://inst.eecs.berkeley.edu/~cs188/sp08/projects/blackjack/blackjack.py
+# Implementation based loosely on: http://outlace.com/Reinforcement-Learning-Part-2/
 # each value card has a 1:13 chance of being selected (we don't care about suits for blackjack)
-
 
 class DecisionState(object):
     def __init__(self):
         self.count = 0
         self.value_estimate = 0  # Without any information assume reward equivalent of DRAW
-
-    def update_value_estimate(self, reward):
-        """
-        Calculate running average of value estimate for a given decision-state
-        """
-        self.count += 1
-        new_value = self.value_estimate + (1 / self.count) * (reward - self.value_estimate)
-        self.value_estimate = new_value
 
 
 class BanditAlgorithm(object):
@@ -25,20 +19,120 @@ class BanditAlgorithm(object):
         self.decision_states = {}
         self.params = params
         self.policy = {}
+        self.decisions = None
 
-    def select_decision_given_information(self, information, algorithm='random'):
-        if algorithm == 'random':
-            decision = random.choice(['hit', 'stay'])
+    def return_decision_reward_tuples(self, information, model):
+        table = []
+        for decision in model.all_possible_decisions:
+            if model.model_class == 'scikit' and hasattr(model.model, 'intercept_'):
+                feature_vector, y = model.return_design_matrix(all_decision_states=[(information, decision)])
+                reward = model.predict(feature_vector)[0]
+                table.append((decision, reward))
+
+            elif model.model_class == 'lookup_table':
+                reward = model.predict((information, decision))
+                table.append((decision, reward))
+
+        return table
+
+    def return_decision_with_max_reward(self, table):
+        table.sort(key=lambda tup: tup[1], reverse=True)
+        return table[0]
+
+    def select_decision_given_information(self, information, model=None, algorithm='random'):
 
         if algorithm == 'epsilon-greedy':
-            if random.random() > self.params and information in self.decision_states:
-                x = [(decision, obs.value_estimate) for decision, obs in self.decision_states[information].iteritems()]
-                x.sort(key=lambda tup: tup[1], reverse=True)
-                return x[0][0]
-            else:
-                return random.choice(['hit', 'stay'])
+            if random.random() > self.params:
 
-        return decision
+                table = self.return_decision_reward_tuples(information, model)
+                # Store policy learned so far
+                if table:
+                    best_known_decision = self.return_decision_with_max_reward(table)
+                    self.policy[information] = [information[0], information[1], best_known_decision[0], best_known_decision[1]]
+
+                else:
+                    best_known_decision = (random.choice(model.all_possible_decisions), 0)
+
+            else:
+                best_known_decision = (random.choice(model.all_possible_decisions), 0)
+
+            return best_known_decision
+
+
+class Model(object):
+    def __init__(self, params):
+        self.model_class = params['class']
+        self.model = {}
+        self.feature_constructor = None
+        self.all_possible_decisions = []
+        self.X = []
+        self.y = []
+        self.buffer = 0
+
+    def initialize(self):
+        if self.model_class == 'scikit':
+            self.model = SGDRegressor(loss='squared_loss', alpha=0.1, n_iter=10, shuffle=True, eta0=0.0001)
+            self.feature_constructor = FeatureHasher(n_features=200, dtype=np.float64, non_negative=False, input_type='dict')
+
+        elif self.model_class == 'lookup':
+            self.model = {}
+
+    def clean_buffer(self):
+        self.X = []
+        self.y = []
+        self.buffer = 0
+
+    def return_design_matrix(self, all_decision_states, reward=None):
+        if self.model_class == 'lookup_table':
+            return all_decision_states, reward
+
+        elif self.model_class == 'scikit':
+            X, y = [], []
+            for decision_state in all_decision_states:
+                information, decision_taken = decision_state
+                tr = {}
+                tr['-'.join([str(information[1]), decision_taken])] = 1
+                tr['-'.join([str(information[0]), decision_taken])] = 1
+                tr['-'.join([str(information[0]), str(information[1]), decision_taken])] = 1
+
+                X.append(tr)
+                y.extend([reward])
+            X = self.feature_constructor.transform(X).toarray()
+
+            return X, y
+
+    def fit(self, X, y):
+        if self.model_class == 'scikit':
+            # X, y = self.shuffle_data(X, y)
+            self.model.partial_fit(X, y)
+            print self.model.score(X, y)
+
+        if self.model_class == 'lookup_table':
+            for decision_state in X:
+                if decision_state not in self.model:
+                    for d in self.all_possible_decisions:
+                        self.model[(decision_state[0], d)] = DecisionState()
+
+                self.model[decision_state].count += 1
+                updated_value = self.model[decision_state].value_estimate + (1.0 / self.model[decision_state].count) * (
+                y - self.model[decision_state].value_estimate)
+                self.model[decision_state].value_estimate = updated_value
+
+    def predict(self, X):
+        if self.model_class == 'scikit':
+            return self.model.predict(X)
+
+        if self.model_class == 'lookup_table':
+            if X not in self.model:
+                for d in self.all_possible_decisions:
+                    self.model[(X[0], d)] = DecisionState()
+            return self.model[X].value_estimate
+
+    @staticmethod
+    def shuffle_data(a, b):
+        assert len(a) == len(b)
+        p = np.random.permutation(len(a))
+        return a[p], b[p]
 
 
 class BlackJack(object):
@@ -84,10 +178,14 @@ class BlackJack(object):
             return val
 
     def add_card_to_player(self, card):
+        # card = random.choice([2,3,4,9,10])
+        # card = random.choice([10])
         self.player_hand.extend([card])
         self.player_value = self.reevaluate_value(self.player_hand)
 
     def add_card_to_dealer(self, card):
+        # card = random.choice([9,8,3,2,4,5,6,1,7])
+        # card = random.choice([9, 2])
         self.dealer_hand.extend([card])
         self.dealer_value = self.reevaluate_value(self.dealer_hand)
 
@@ -182,51 +280,66 @@ class BlackJack(object):
 
         return reward
 
-    def complete_one_round(self, banditAlgorithm):
+    def complete_one_episode(self, banditAlgorithm, model=None):
         all_decision_states = []
-        all_available_decisions_at_any_state = ['hit', 'stay']
         while self.game_status == 'in process':
             # self.print_game_status()
             information = (self.player_value, self.dealer_value)
-            decision = banditAlgorithm.select_decision_given_information(information, 'epsilon-greedy')
-
-            # Store policy
-            banditAlgorithm.policy[information] = decision
+            decision, prob = banditAlgorithm.select_decision_given_information(information, algorithm='epsilon-greedy', model=model)
 
             # Only terminal state returns a valid reward
             reward = self.play(decision)
+
             all_decision_states.append((information, decision))
 
-        # Store and update value estimates for all decision-state tuples based on the observed reward
-        for decision_state in all_decision_states:
-            information, decision_taken = decision_state
-
-            if decision_state in banditAlgorithm.decision_states:
-                banditAlgorithm.decision_states[decision_state].update_value_estimate(reward)
-            else:
-                if information not in banditAlgorithm.decision_states:
-                    banditAlgorithm.decision_states[information] = {d: DecisionState() for d in all_available_decisions_at_any_state}
-
-                banditAlgorithm.decision_states[information][decision].update_value_estimate(reward)
+        return all_decision_states, reward
 
 
-def train_reinforcement_learning_strategy(num_sims=1):
-    banditAlgorithm = BanditAlgorithm()
+def learn_Q_function(all_observed_decision_states, reward, model):
+    if model.model_class == 'lookup_table':
+        model.fit(all_observed_decision_states, reward)
+
+    elif model.model_class == 'scikit':
+        X_new, y_new = model.return_design_matrix(all_observed_decision_states, reward)
+        model.X.extend(X_new)
+        model.y.extend(y_new)
+
+        if model.buffer == 100:
+            model.fit(model.X, model.y)
+            model.clean_buffer()
+
+    return model
+
+
+def train_reinforcement_learning_strategy(num_sims=1, model_class='lookup_table'):
+
+    # Initialize model
+    model = Model({'class': model_class})
+    banditAlgorithm = BanditAlgorithm(params=0.2)
+    model.initialize()
+    model.all_possible_decisions = ['hit', 'stay']
+
     for _ in xrange(num_sims):
+        model.buffer += 1
+
+        # Initialize game
         blackjack = BlackJack()
         blackjack.initiate_game()
-        blackjack.complete_one_round(banditAlgorithm)
+        if blackjack.game_status != 'in process':
+            continue
 
-    print str(banditAlgorithm.policy)
+        all_observed_decision_states, reward = blackjack.complete_one_episode(banditAlgorithm, model)
+        model = learn_Q_function(all_observed_decision_states, reward, model)
+
+    return banditAlgorithm.policy, model
 
 
 if __name__ == "__main__":
-
-    banditAlgorithm = BanditAlgorithm(params=0.1)
-    for _ in xrange(100000):
-        blackjack = BlackJack()
-        blackjack.initiate_game()
-        blackjack.complete_one_round(banditAlgorithm)
-
-    print banditAlgorithm.policy
-    # train_reinforcement_learning_strategy(num_sims=1)
+    #policy, model = train_reinforcement_learning_strategy(num_sims=500000, model_class='lookup_table')
+    policy, model = train_reinforcement_learning_strategy(num_sims=50000, model_class='scikit')
+    pd = pd.DataFrame(policy).T
+    pd.columns = ['player_value', 'dealer_value', 'decision', 'score']
+    pt = pd.pivot('player_value', 'dealer_value')['decision']
+    print pt
+    pt1 = pd.pivot('player_value', 'dealer_value')['score']
+    print pt1
