@@ -89,9 +89,6 @@ class Model(object):
             return all_decision_states[0], reward
 
         elif self.model_class == 'scikit':
-            # if all_decision_states in self.design_matrix_cache:
-            #     X, y = self.design_matrix_cache[all_decision_states]
-            # else:
             X, y = [], []
             for decision_state in all_decision_states:
                 information, decision_taken = decision_state
@@ -145,19 +142,13 @@ class Model(object):
         elif self.model_class == 'vw':
             # if model file exists do --save resume
             # http://stackoverflow.com/questions/13835055/python-subprocess-check-output-much-slower-then-call
-            if os.path.isfile(self.model_path):
-                with NamedTemporaryFile() as f:
-                    p = Popen(self.train_vw_resume_cmd, stdout=f, stdin=PIPE, stderr=STDOUT)
-                    tr = '\n'.join(X)
-                    res=p.communicate(tr)
-                    f.seek(0)
-                    res = f.read()
-
-            # else train a new model
-            else:
-                p = Popen(self.train_vw_cmd, stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+            with NamedTemporaryFile() as f:
+                cmd = self.train_vw_resume_cmd if os.path.isfile(self.model_path) else self.train_vw_cmd
+                p = Popen(cmd, stdout=f, stdin=PIPE, stderr=STDOUT)
                 tr = '\n'.join(X)
                 res=p.communicate(tr)
+                f.seek(0)
+                res = f.read()
                 print res
 
     def predict(self, test):
