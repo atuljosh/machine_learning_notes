@@ -49,8 +49,8 @@ def learn_Q_function(all_observed_decision_states, reward, model):
     elif model.model_class == 'scikit' or model.model_class == 'vw':
         for decision_state in all_observed_decision_states:
             X_new, y_new = model.return_design_matrix(decision_state, reward)
-            model.X.extend(X_new)
-            model.y.extend(y_new)
+            model.X.append(X_new)
+            model.y.append(y_new)
 
         if model.buffer == 1000:
             model.fit(model.X, model.y)
@@ -181,9 +181,9 @@ if __name__ == "__main__":
 
     # If we want complete game episodes
     blackjack = BlackJack()
-    #policy, model = train_reinforcement_learning_strategy(num_sims=5000, game_obs=blackjack, model_class='lookup_table')
+    policy, model = train_reinforcement_learning_strategy(num_sims=5000, game_obs=blackjack, model_class='lookup_table')
     #policy, model = train_reinforcement_learning_strategy(num_sims=5000, game_obs=blackjack, model_class='scikit')
-    policy, model = train_reinforcement_learning_strategy(num_sims=5000, game_obs=blackjack, model_class='vw')
+    #policy, model = train_reinforcement_learning_strategy(num_sims=5000, game_obs=blackjack, model_class='vw')
 
     pd = pd.DataFrame(policy).T
     pd.columns = ['player_value', 'dealer_value', 'decision', 'score']

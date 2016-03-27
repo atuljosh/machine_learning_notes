@@ -88,36 +88,26 @@ class Model(object):
         if self.model_class == 'lookup_table':
             return decision_state, reward
 
-        elif self.model_class == 'scikit':
-            X, y = [], []
+        else:
             information, decision_taken = decision_state
             all_features = ['-'.join([i, str(j), decision_taken]) for i,j in zip(information._fields, information)]
             all_features_with_interaction = all_features + ['_'.join(all_features)]
-            tr = {fea_value: 1 for fea_value in all_features_with_interaction}
-            X.append(tr)
-            y.extend([reward])
-            X = self.feature_constructor.transform(X).toarray()
-            return X, y
 
-        elif self.model_class == 'vw':
-            X, y = [], []
-            fv = " "
-            information, decision_taken = decision_state
-            all_features = ['-'.join([i, str(j), decision_taken]) for i,j in zip(information._fields, information)]
-            all_features_with_interaction = all_features + ['_'.join(all_features)]
-            input = " ".join(all_features_with_interaction)
+            if self.model_class == 'scikit':
+                tr = {fea_value: 1 for fea_value in all_features_with_interaction}
+                fv = self.feature_constructor.transform([tr]).toarray()
+                fv = fv[0]
 
-            if reward:
-                output = str(reward) + " " + '-'.join([str(information[0]), str(information[1]), decision_taken])
-                fv = output + " |" + input
-            else:
-                fv = " |" + input
-            X.append(fv)
-            y.extend([reward])
-            X = '\n'.join(X) + '\n'
-            if reward:
-                self.f1.write(X)
-            return [X], y
+            elif self.model_class == 'vw':
+                input = " ".join(all_features_with_interaction)
+                if reward:
+                    output = str(reward) + " " + '-'.join([str(information[0]), str(information[1]), decision_taken])
+                    fv = output + " |" + input + '\n'
+                    self.f1.write(fv)
+                else:
+                    fv = " |" + input + '\n'
+
+            return fv, reward
 
     def fit(self, X, y):
         if self.model_class == 'scikit':
@@ -150,6 +140,7 @@ class Model(object):
 
     def predict(self, test):
         if self.model_class == 'scikit':
+            test = test.reshape(1, -1) # Reshape for single sample
             return self.model.predict(test)[0]
 
         elif self.model_class == 'lookup_table':
@@ -162,8 +153,7 @@ class Model(object):
             with NamedTemporaryFile() as f:
                 cmd = ['/usr/local/bin/vw', '-t', '-i', self.model_path, '-p', '/dev/stdout', '--quiet']
                 p = Popen(cmd, stdout=f, stdin=PIPE, stderr=STDOUT)
-                tr = '\n'.join(test)
-                res = p.communicate(tr)
+                res = p.communicate(test)
                 f.seek(0)
                 res = f.readline().strip()
             return float(res)
