@@ -32,8 +32,9 @@ class BanditAlgorithm(object):
         q_value_table = []
         for decision in model.all_possible_decisions:
             if model.if_model_exists():
-                all_decision_states = tuple([(information, decision)])
-                feature_vector, y = model.return_design_matrix(all_decision_states)
+                #all_decision_states = tuple([(information, decision)])
+                decision_state = (information, decision)
+                feature_vector, y = model.return_design_matrix(decision_state)
                 reward = model.predict(feature_vector)
                 q_value_table.append((decision, reward))
 

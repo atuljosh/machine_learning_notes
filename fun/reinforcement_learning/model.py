@@ -79,44 +79,41 @@ class Model(object):
 
     # TODO Store design matrix in cache so we don't have to compute it all the time
     #@do_profile
-    def return_design_matrix(self, all_decision_states, reward=None):
+    def return_design_matrix(self, decision_state, reward=None):
         """
         Design matrix can simply return catesian product of information and decision
         For now all categorical features
         """
         # TODO Kill game specific features
         if self.model_class == 'lookup_table':
-            return all_decision_states[0], reward
+            return decision_state, reward
 
         elif self.model_class == 'scikit':
             X, y = [], []
-            for decision_state in all_decision_states:
-                information, decision_taken = decision_state
-                all_features = ['-'.join([i, str(j), decision_taken]) for i,j in zip(information._fields, information)]
-                all_features_with_interaction = all_features + ['_'.join(all_features)]
-                tr = {fea_value: 1 for fea_value in all_features_with_interaction}
-                X.append(tr)
-                y.extend([reward])
+            information, decision_taken = decision_state
+            all_features = ['-'.join([i, str(j), decision_taken]) for i,j in zip(information._fields, information)]
+            all_features_with_interaction = all_features + ['_'.join(all_features)]
+            tr = {fea_value: 1 for fea_value in all_features_with_interaction}
+            X.append(tr)
+            y.extend([reward])
             X = self.feature_constructor.transform(X).toarray()
-                # self.design_matrix_cache[all_decision_states] = (X, y)
             return X, y
 
         elif self.model_class == 'vw':
             X, y = [], []
-            for decision_state in all_decision_states:
-                fv = " "
-                information, decision_taken = decision_state
-                all_features = ['-'.join([i, str(j), decision_taken]) for i,j in zip(information._fields, information)]
-                all_features_with_interaction = all_features + ['_'.join(all_features)]
-                input = " ".join(all_features_with_interaction)
+            fv = " "
+            information, decision_taken = decision_state
+            all_features = ['-'.join([i, str(j), decision_taken]) for i,j in zip(information._fields, information)]
+            all_features_with_interaction = all_features + ['_'.join(all_features)]
+            input = " ".join(all_features_with_interaction)
 
-                if reward:
-                    output = str(reward) + " " + '-'.join([str(information[0]), str(information[1]), decision_taken])
-                    fv = output + " |" + input
-                else:
-                    fv = " |" + input
-                X.append(fv)
-                y.extend([reward])
+            if reward:
+                output = str(reward) + " " + '-'.join([str(information[0]), str(information[1]), decision_taken])
+                fv = output + " |" + input
+            else:
+                fv = " |" + input
+            X.append(fv)
+            y.extend([reward])
             X = '\n'.join(X) + '\n'
             if reward:
                 self.f1.write(X)
