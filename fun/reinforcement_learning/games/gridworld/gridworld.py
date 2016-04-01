@@ -13,7 +13,7 @@ class AbstractGame(object):
     def __init__(self):
         self.game_status = None
         self.state = None
-        self.state_info = None
+        #self.state_info = None
         self.base_folder_name = None
         self.all_possible_decisions = None
 
@@ -32,7 +32,7 @@ class GridWorld(AbstractGame):
         self.all_possible_decisions = ['up', 'down', 'left', 'right']
         self.coordinates = namedtuple('coordinates', ['x', 'y'])
         self.all_used_coordinates = {'x': set(), 'y': set()}
-        self.state_info = None
+        #self.state_info = None
         self.game_status = None
         self.state = None
 
@@ -55,6 +55,7 @@ class GridWorld(AbstractGame):
          - so our design matrix should only be set of pixels (or image representation) AND decision taken
          - all we know is : there are 4 things on the screen.. lets use sparse representation
         """
+        # TODO Randomize
         x, y = 0,2 #self.random_unsed_coordinates(0, 4)
         self.player_info = self.coordinates(x, y)
         x, y = 1,3 #self.random_unsed_coordinates(0, 4)
@@ -63,7 +64,7 @@ class GridWorld(AbstractGame):
         self.pit_info = self.coordinates(x, y)
         x, y = 3,3 #self.random_unsed_coordinates(0, 4)
         self.win_info = self.coordinates(x, y)
-        self.state_info = (self.player_info, self.wall_info, self.pit_info, self.win_info)
+        self.state = (self.player_info, self.wall_info, self.pit_info, self.win_info)
 
     def display_grid(self):
         grid = np.zeros((4,4), dtype='<U2')
@@ -103,6 +104,13 @@ class GridWorld(AbstractGame):
             if new_loc != self.wall_info and new_loc.x <= 3:
                 self.player_info = new_loc
 
+        # Reset state
+        self.state = (self.player_info, self.wall_info, self.pit_info, self.win_info)
+
+        # Get and return reward
+        reward = self.get_reward()
+        return reward
+
     def get_reward(self):
         if self.player_info == self.pit_info:
             return -10
@@ -112,23 +120,22 @@ class GridWorld(AbstractGame):
             return -1
 
 
-
 if __name__ == "__main__":
     gridworld = GridWorld()
     gridworld.initiate_game()
     print gridworld.player_info
     gridworld.display_grid()
-    gridworld.play('down')
+    reward = gridworld.play('down')
     print gridworld.player_info
     gridworld.display_grid()
-    gridworld.play('down')
+    reward = gridworld.play('down')
     print gridworld.player_info
     print gridworld.display_grid()
-    gridworld.play('down')
+    reward = gridworld.play('down')
     print gridworld.player_info
     print gridworld.display_grid()
-    gridworld.play('right')
+    reward = gridworld.play('right')
     print gridworld.player_info
     print gridworld.display_grid()
 
-    print gridworld.get_reward()
+    print reward

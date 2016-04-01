@@ -5,8 +5,12 @@ import bandits as bandit
 from subprocess import Popen, PIPE, STDOUT
 import os
 from tempfile import NamedTemporaryFile
-
+import sys
+from vowpal_wabbit import pyvw
+import random
 from line_profiler import LineProfiler
+
+
 def do_profile(func):
     def profiled_func(*args, **kwargs):
         try:
@@ -16,6 +20,7 @@ def do_profile(func):
             return func(*args, **kwargs)
         finally:
             profiler.print_stats()
+
     return profiled_func
 
 
@@ -30,6 +35,11 @@ class Model(object):
         self.buffer = 0
         self.base_folder_name = params['base_folder_name']
         self.design_matrix_cache = {}
+        self.exists = False
+
+    def finish(self):
+        if self.model_class == 'vw_python':
+            self.model.finish()
 
     def initialize(self):
         if self.model_class == 'scikit':
@@ -39,38 +49,51 @@ class Model(object):
         elif self.model_class == 'lookup':
             self.model = {}
 
+        # This thing crawls,, too much python overhead for subprocess and pipe
         elif self.model_class == 'vw':
             self.model = None
-
             self.model_path = self.base_folder_name + "/model.vw"
             self.cache_path = self.base_folder_name + "/temp.cache"
             self.f1 = open(self.base_folder_name + "/train.vw", 'a')
 
-            self.train_vw_cmd = ['/usr/local/bin/vw', '--save_resume', '--holdout_off', '-c', '--cache_file',self.cache_path,
+            self.train_vw_cmd = ['/usr/local/bin/vw', '--save_resume', '--holdout_off', '-c', '--cache_file', self.cache_path,
                                  '-f', self.model_path, '--passes', '20', '--loss_function', 'squared']
             self.train_vw_resume_cmd = ['/usr/local/bin/vw', '--save_resume',
-                                 '-i', self.model_path, '-f', self.model_path]
-            #self.remove_vw_files()
+                                        '-i', self.model_path, '-f', self.model_path]
+
+            # self.remove_vw_files()
+
+        elif self.model_class == 'vw_python':
+            # TODO interactions, lrq, dropout etc commands go here
+            # TODO Need to pass model path and throw finish somewhere to store the final model
+            self.model_path = self.base_folder_name + "/model.vw"
+            self.cache_path = self.base_folder_name + "/temp.cache"
+            self.model = pyvw.vw(quiet=True, l2=0.00000001, loss_function='squared', passes=1, holdout_off=True, cache=self.cache_path,
+                                 f=self.model_path)
 
     def remove_vw_files(self):
         if os.path.isfile(self.cache_path): os.remove(self.cache_path)
         if os.path.isfile(self.f1): os.remove(self.f1)
         if os.path.isfile(self.model_path): os.remove(self.model_path)
 
-    def if_model_exists(self):
-        exists = False
-        if self.model_class == 'lookup_table':
-            if self.model:
-                exists = True
-
-        elif self.model_class == 'scikit':
-            if hasattr(self.model, 'intercept_'):
-                exists = True
-
-        elif self.model_class == 'vw':
-            if os.path.isfile(self.model_path):
-                exists = True
-        return exists
+    # def if_model_exists(self):
+    #     exists = False
+    #     if self.model_class == 'lookup_table':
+    #         if self.model:
+    #             self.exists = True
+    #
+    #     elif self.model_class == 'scikit':
+    #         if hasattr(self.model, 'intercept_'):
+    #             self.exists = True
+    #
+    #     elif self.model_class == 'vw':
+    #         if os.path.isfile(self.model_path):
+    #             self.exists = True
+    #
+    #     elif self.model_class == 'vw_python':
+    #         return self.exists
+    #
+    #     return exists
 
     def clean_buffer(self):
         self.X = []
@@ -78,10 +101,10 @@ class Model(object):
         self.buffer = 0
 
     # TODO Store design matrix in cache so we don't have to compute it all the time
-    #@do_profile
+    # @do_profile
     def return_design_matrix(self, decision_state, reward=None):
         """
-        Design matrix can simply return catesian product of information and decision
+        Design matrix can simply return catesian product of state and decision
         For now all categorical features
         """
         # TODO Kill game specific features
@@ -89,23 +112,39 @@ class Model(object):
             return decision_state, reward
 
         else:
-            information, decision_taken = decision_state
-            all_features = ['-'.join([i, str(j), decision_taken]) for i,j in zip(information._fields, information)]
-            all_features_with_interaction = all_features + ['_'.join(all_features)]
 
-            if self.model_class == 'scikit':
-                tr = {fea_value: 1 for fea_value in all_features_with_interaction}
-                fv = self.feature_constructor.transform([tr]).toarray()
-                fv = fv[0]
+            if decision_state in self.design_matrix_cache:
+                fv, reward = self.design_matrix_cache[decision_state]
 
-            elif self.model_class == 'vw':
-                input = " ".join(all_features_with_interaction)
-                if reward:
-                    output = str(reward) + " " + '-'.join([str(information[0]), str(information[1]), decision_taken])
-                    fv = output + " |" + input + '\n'
-                    self.f1.write(fv)
-                else:
-                    fv = " |" + input + '\n'
+            else:
+                state, decision_taken = decision_state
+                # Decision pixel tuple is our design matrix
+                # TODO Do interaction via vw namespaces may be?
+                # Right now features are simply state X decision interaction + single interaction feature representing state
+                all_features = ['-'.join([i, str(j), decision_taken]) for i, j in zip(state._fields, state)]
+                all_features_with_interaction = all_features + ['_'.join(all_features)]
+
+                if self.model_class == 'scikit':
+                    tr = {fea_value: 1 for fea_value in all_features_with_interaction}
+                    fv = self.feature_constructor.transform([tr]).toarray()
+                    fv = fv[0]
+
+                elif self.model_class == 'vw' or self.model_class == 'vw_python':
+                    input = " ".join(all_features_with_interaction)
+                    if reward:
+                        output = str(reward) + " " + '-'.join([str(state[0]), str(state[1]), decision_taken])
+                        fv = output + " |" + input + '\n'
+                        # self.f1.write(fv)
+                    else:
+                        fv = " |" + input + '\n'
+
+                    if self.model_class == 'vw_python':
+                        fv = self.model.example(fv)
+
+                # Store only training examples
+                # TODO: pyvw still screwed up for cache
+                # if reward:
+                #     self.design_matrix_cache[decision_state] = (fv, reward)
 
             return fv, reward
 
@@ -114,6 +153,7 @@ class Model(object):
             # X, y = self.shuffle_data(X, y)
             self.model.partial_fit(X, y)
             print self.model.score(X, y)
+            self.exists = True
 
         elif self.model_class == 'lookup_table':
             for decision_state in X:
@@ -123,8 +163,9 @@ class Model(object):
 
                 self.model[decision_state].count += 1
                 updated_value = self.model[decision_state].value_estimate + (1.0 / self.model[decision_state].count) * (
-                y - self.model[decision_state].value_estimate)
+                    y - self.model[decision_state].value_estimate)
                 self.model[decision_state].value_estimate = updated_value
+            self.exists = True
 
         elif self.model_class == 'vw':
             # if model file exists do --save resume
@@ -133,14 +174,27 @@ class Model(object):
                 cmd = self.train_vw_resume_cmd if os.path.isfile(self.model_path) else self.train_vw_cmd
                 p = Popen(cmd, stdout=f, stdin=PIPE, stderr=STDOUT)
                 tr = '\n'.join(X)
-                res=p.communicate(tr)
+                res = p.communicate(tr)
                 f.seek(0)
                 res = f.read()
                 print res
+            self.exists = True
 
+        elif self.model_class == 'vw_python':
+            # TODO create example and fit
+            # TODO Remember X is list of examples (not a single example) SO How to go about that?
+            # TODO Or just use scikit learn interface
+            # Let's use vw as good'old sgd solver
+            for _ in xrange(5):
+                random.shuffle(X)
+                res = [fv.learn() for fv in X]
+            self.exists = True
+            #print 'done'
+
+    # @do_profile
     def predict(self, test):
         if self.model_class == 'scikit':
-            test = test.reshape(1, -1) # Reshape for single sample
+            test = test.reshape(1, -1)  # Reshape for single sample
             return self.model.predict(test)[0]
 
         elif self.model_class == 'lookup_table':
@@ -156,8 +210,13 @@ class Model(object):
                 res = p.communicate(test)
                 f.seek(0)
                 res = f.readline().strip()
-            return float(res)
+                return float(res)
 
+        elif self.model_class == 'vw_python':
+            # TODO Create example and fit
+            test.learn()  # Little wierd that we have to call learn at all for a prediction
+            res = test.get_simplelabel_prediction()
+            return res
 
     @staticmethod
     def shuffle_data(a, b):

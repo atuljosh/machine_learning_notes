@@ -3,6 +3,7 @@ from collections import namedtuple
 from .. import game
 import os
 
+# TODO Resolve for information <===> state.. unneccessary confusion
 
 class BlackJack(game.AbstractGame):
 
@@ -127,7 +128,7 @@ class BlackJack(game.AbstractGame):
         status, reward = self.evaluate_game()
         self.game_status = status
         self.state = self.state_info(self.player_value, self.dealer_value)
-        self.information = self.state_info(self.player_value, self.dealer_value)
+        #self.information = self.state_info(self.player_value, self.dealer_value)
 
         return
 
@@ -154,7 +155,7 @@ class BlackJack(game.AbstractGame):
 
         self.game_status = status
         self.state = self.state_info(self.player_value, self.dealer_value)
-        self.information = self.state_info(self.player_value, self.dealer_value)
+        #self.information = self.state_info(self.player_value, self.dealer_value)
 
         return reward
 
@@ -163,7 +164,7 @@ class BlackJack(game.AbstractGame):
         while self.game_status == 'in process':
             # self.print_game_status()
             information = self.state_info(self.player_value, self.dealer_value)
-            decision, prob = banditAlgorithm.select_decision_given_information(information, algorithm='epsilon-greedy', model=model)
+            decision, prob = banditAlgorithm.select_decision_given_state(information, model=model, algorithm='epsilon-greedy')
 
             # Only terminal state returns a valid reward
             reward = self.play(decision)

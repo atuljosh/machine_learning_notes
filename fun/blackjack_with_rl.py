@@ -285,7 +285,7 @@ class BlackJack(object):
         while self.game_status == 'in process':
             # self.print_game_status()
             information = (self.player_value, self.dealer_value)
-            decision, prob = banditAlgorithm.select_decision_given_information(information, algorithm='epsilon-greedy', model=model)
+            decision, prob = banditAlgorithm.select_decision_given_state(information, model=model, algorithm='epsilon-greedy')
 
             # Only terminal state returns a valid reward
             reward = self.play(decision)
