@@ -10,6 +10,9 @@ from vowpal_wabbit import pyvw
 import random
 from line_profiler import LineProfiler
 
+# TODO Implement LRQ and LRQ dropout (I don't think it is doing the right thing)
+# TODO With -lrq now it is very slow
+#
 
 def do_profile(func):
     def profiled_func(*args, **kwargs):
@@ -68,8 +71,10 @@ class Model(object):
             # TODO Need to pass model path and throw finish somewhere to store the final model
             self.model_path = self.base_folder_name + "/model.vw"
             self.cache_path = self.base_folder_name + "/temp.cache"
+            # self.model = pyvw.vw(quiet=True, l2=0.00000001, loss_function='squared', passes=1, holdout_off=True, cache=self.cache_path,
+            #                      f=self.model_path,  lrq='sdsd7', lrqdropout=True)
             self.model = pyvw.vw(quiet=True, l2=0.00000001, loss_function='squared', passes=1, holdout_off=True, cache=self.cache_path,
-                                 f=self.model_path)
+                                 f=self.model_path) #,  lrq='sdsd7', lrqdropout=True)
 
     def remove_vw_files(self):
         if os.path.isfile(self.cache_path): os.remove(self.cache_path)
@@ -133,10 +138,10 @@ class Model(object):
                     input = " ".join(all_features_with_interaction)
                     if reward:
                         output = str(reward) + " " + '-'.join([str(state[0]), str(state[1]), decision_taken])
-                        fv = output + " |" + input + '\n'
+                        fv = output + " |sd " + input + '\n'
                         # self.f1.write(fv)
                     else:
-                        fv = " |" + input + '\n'
+                        fv = " |sd " + input + '\n'
 
                     if self.model_class == 'vw_python':
                         fv = self.model.example(fv)
@@ -184,6 +189,7 @@ class Model(object):
             # TODO create example and fit
             # TODO Remember X is list of examples (not a single example) SO How to go about that?
             # TODO Or just use scikit learn interface
+            # vw = pyvw.vw(quiet=True, lrq='aa7', lrqdropout=True, l2=0.01)
             # Let's use vw as good'old sgd solver
             for _ in xrange(5):
                 random.shuffle(X)

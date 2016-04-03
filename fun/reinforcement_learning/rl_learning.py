@@ -7,9 +7,8 @@ import random
 import time
 
 
-# TODO : 1) Abstract out design matrix for game
 # TODO : 2) Implement Q learning and SARSA
-# TODO:  3) Start thinking about gridworld
+# TODO:  3) Implement and see how gridworld works
 
 import cProfile
 from line_profiler import LineProfiler
@@ -92,10 +91,10 @@ def train_reinforcement_learning_strategy(num_sims=1, game_obs='blackjack', mode
 # TODO New function for training reinforcement strategy
 # TODO SUPER SLOW - FIND OUT WHAT IS CAUSING AN ISSUE
 #@do_profile
-def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackjack', model_class='lookup_table'):
+def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackjack', model_class='lookup_table',algo='q_learning' ):
     # Initialize model
 
-    # TODO y must be really current reward + discount * max future reward
+    start_time = time.time()
 
     model = Model({'class': model_class, 'base_folder_name': game_obs.base_folder_name})
     model.initialize()
@@ -113,16 +112,23 @@ def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackja
         # Initialize game
         game_obs.initiate_game()
         banditAlgorithm.params = epsilon
+        move = 0
 
         # TODO This assumes we have a dumb model when we initialize
         while game_obs.game_status == 'in process':
+            move += 1
+
+            # Let's start new game if after 10 moves game doesn't end
+            if move > 10:
+                break
+
             model.buffer += 1
             old_state = game_obs.state
 
             # TODO Finish implement q value update using Bellman equation
-            best_known_decision, known_reward = banditAlgorithm.select_decision_given_state(game_obs.information, model,
+            best_known_decision, known_reward = banditAlgorithm.select_decision_given_state(game_obs.state, model,
                                                                                             algorithm='epsilon-greedy')
-            # Play or make move to get to a new state and see new reward
+            # Play or make move to get to a new state and see reward
             reward = game_obs.play(best_known_decision)
             new_state = game_obs.state
 
@@ -146,15 +152,19 @@ def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackja
 
                     # TODO Rename these vars.. they are muddying the waters
                     old_state_er, action_er, reward_er, new_state_er = memory
-                    # Get q values for the new state, and then choose best action (a single step temporal difference q learning)
-                    # Get value estimate for that best action and update EXISTING reward
-                    # TODO SARSA and lambda-SARSA - foo this is getting out of hand
-                    new_qval_table = banditAlgorithm.return_decision_reward_tuples(new_state_er, model)
-                    if new_qval_table:
-                        max_decision, max_reward = banditAlgorithm.return_decision_with_max_reward(new_qval_table)
-                        # TODO This check should be earlier to save all the processing
-                        if game_obs.game_status == 'in process': #non-terminal state
-                            # Q-learning
+
+                    if game_obs.game_status == 'in process' and model.exists: #non-terminal state
+                        # Get q values for the new state, and then choose best action (a single step temporal difference q learning)
+                        # Get value estimate for that best action and update EXISTING reward
+                        if algo == 'q_learning':
+                            result = banditAlgorithm.return_action_based_on_greedy_policy(new_state_er, model)
+                            max_reward = result[1]
+                        elif algo == 'sarsa':
+                            result = banditAlgorithm.select_decision_given_state(new_state_er, model,
+                                                                                            algorithm='epsilon-greedy')
+                            max_reward = game_obs.play(result[0])
+
+                        if result:
                             reward_er = (reward_er + (gamma * max_reward))
 
                     X_new, y_new = model.return_design_matrix((old_state_er, action_er), reward_er)
@@ -172,11 +182,15 @@ def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackja
                     # TODO Instead of killing entire buffer we can keep a few and kill only the subset
                     model.clean_buffer()
 
-                #print("Game #: %s" % (_,))
+                print("Game #: %s" % (_,))
 
             # TODO Check for terminal state
         if epsilon > 0.1:  # decrement epsilon over time
             epsilon -= (1.0 / epochs)
+
+    model.finish()
+    elapsed_time = int(time.time() - start_time)
+    print ": took time:" + str(elapsed_time)
 
     return banditAlgorithm.policy, model
 
@@ -187,7 +201,7 @@ def test_policy(game_obs, model):
     game_obs.initiate_game()
     print "Initial state:"
     print game_obs.state
-    move = 0
+    move = 1
     while game_obs.game_status == 'in process':
         new_qval_table = banditAlgorithm.return_decision_reward_tuples(game_obs.state, model)
         best_action, value_estimate = banditAlgorithm.return_decision_with_max_reward(new_qval_table)
@@ -204,26 +218,12 @@ def test_policy(game_obs, model):
 if __name__ == "__main__":
 
     # If we want complete game episodes
-    blackjack = BlackJack()
-    #policy, model = train_reinforcement_learning_strategy(num_sims=50000, game_obs=blackjack, model_class='lookup_table')
-    #policy, model = train_reinforcement_learning_strategy(num_sims=5000, game_obs=blackjack, model_class='scikit')
-    #policy, model = train_reinforcement_learning_strategy(num_sims=5000, game_obs=blackjack, model_class='vw')
-    policy, model = train_reinforcement_learning_strategy(num_sims=5000, game_obs=blackjack, model_class='vw_python')
-
-    pd = pd.DataFrame(policy).T
-    pd.columns = ['player_value', 'dealer_value', 'decision', 'score']
-    policy_Q_table = pd.pivot('player_value', 'dealer_value')['decision']
-    print policy_Q_table
-    policy_Q_score = pd.pivot('player_value', 'dealer_value')['score']
-    print policy_Q_score
-
-## *** ## Now temporal difference learning
     # blackjack = BlackJack()
-    # gridworld = GridWorld()
-    # #policy, model = train_reinforcement_strategy_temporal_difference(epochs=50000, game_obs=blackjack, model_class='lookup_table')
-    # #policy, model = train_reinforcement_strategy_temporal_difference(epochs=500, game_obs=blackjack, model_class='scikit')
-    # #policy, model = train_reinforcement_strategy_temporal_difference(epochs=2000, game_obs=blackjack, model_class='vw')
-    # policy, model = train_reinforcement_strategy_temporal_difference(epochs=5000, game_obs=blackjack, model_class='vw_python')
+    # #policy, model = train_reinforcement_learning_strategy(num_sims=50000, game_obs=blackjack, model_class='lookup_table')
+    # #policy, model = train_reinforcement_learning_strategy(num_sims=5000, game_obs=blackjack, model_class='scikit')
+    # #policy, model = train_reinforcement_learning_strategy(num_sims=5000, game_obs=blackjack, model_class='vw')
+    # policy, model = train_reinforcement_learning_strategy(num_sims=5000, game_obs=blackjack, model_class='vw_python')
+    #
     # pd = pd.DataFrame(policy).T
     # pd.columns = ['player_value', 'dealer_value', 'decision', 'score']
     # policy_Q_table = pd.pivot('player_value', 'dealer_value')['decision']
@@ -231,4 +231,22 @@ if __name__ == "__main__":
     # policy_Q_score = pd.pivot('player_value', 'dealer_value')['score']
     # print policy_Q_score
 
+## *** ## Now temporal difference learning
+    blackjack = BlackJack()
+    gridworld = GridWorld()
+    #policy, model = train_reinforcement_strategy_temporal_difference(epochs=50000, game_obs=blackjack, model_class='lookup_table')
+    #policy, model = train_reinforcement_strategy_temporal_difference(epochs=500, game_obs=blackjack, model_class='scikit')
+    #policy, model = train_reinforcement_strategy_temporal_difference(epochs=2000, game_obs=blackjack, model_class='vw')
+    policy, model = train_reinforcement_strategy_temporal_difference(epochs=5000, game_obs=blackjack, model_class='vw_python')
+
+    #policy, model = train_reinforcement_strategy_temporal_difference(epochs=500, game_obs=gridworld, model_class='vw_python')
+
+    # pd = pd.DataFrame(policy).T
+    # pd.columns = ['player_value', 'dealer_value', 'decision', 'score']
+    # policy_Q_table = pd.pivot('player_value', 'dealer_value')['decision']
+    # print policy_Q_table
+    # policy_Q_score = pd.pivot('player_value', 'dealer_value')['score']
+    # print policy_Q_score
+    #
     test_policy(blackjack, model)
+    #test_policy(gridworld, model)

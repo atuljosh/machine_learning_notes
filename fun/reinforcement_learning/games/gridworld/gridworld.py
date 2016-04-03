@@ -5,6 +5,7 @@ from collections import namedtuple
 import os
 import numpy as np
 import pandas as pd
+import math
 
 class AbstractGame(object):
 
@@ -13,7 +14,7 @@ class AbstractGame(object):
     def __init__(self):
         self.game_status = None
         self.state = None
-        #self.state_info = None
+        self.player_old_state = None
         self.base_folder_name = None
         self.all_possible_decisions = None
 
@@ -25,14 +26,23 @@ class AbstractGame(object):
     def complete_one_episode(self):
         pass
 
+def flatten_list_of_lists(list_of_lists):
+    return [val for sublist in list_of_lists for val in sublist]
+
 class GridWorld(AbstractGame):
 
     def __init__(self):
         self.base_folder_name = os.path.dirname(os.path.realpath(__file__))
         self.all_possible_decisions = ['up', 'down', 'left', 'right']
+
+        game_objects = ['player', 'wall', 'pit', 'win']
+        game_state_tuples = [[obs + '_x', obs + '_y'] for obs in game_objects]
+        coordinate_list = flatten_list_of_lists(game_state_tuples)
+        self.state_info = namedtuple('state_info', coordinate_list)
+
         self.coordinates = namedtuple('coordinates', ['x', 'y'])
         self.all_used_coordinates = {'x': set(), 'y': set()}
-        #self.state_info = None
+
         self.game_status = None
         self.state = None
 
@@ -64,7 +74,10 @@ class GridWorld(AbstractGame):
         self.pit_info = self.coordinates(x, y)
         x, y = 3,3 #self.random_unsed_coordinates(0, 4)
         self.win_info = self.coordinates(x, y)
-        self.state = (self.player_info, self.wall_info, self.pit_info, self.win_info)
+        game_state = (self.player_info, self.wall_info, self.pit_info, self.win_info)
+        info = flatten_list_of_lists(game_state)
+        self.state = self.state_info(*info)
+        self.game_status = 'in process'
 
     def display_grid(self):
         grid = np.zeros((4,4), dtype='<U2')
@@ -84,6 +97,7 @@ class GridWorld(AbstractGame):
         pass
 
     def play(self, action):
+        self.player_old_state = self.player_info
         if action == 'left':
             new_loc = self.coordinates(self.player_info.x, self.player_info.y-1)
             if new_loc != self.wall_info and new_loc.y >= 0:
@@ -105,7 +119,9 @@ class GridWorld(AbstractGame):
                 self.player_info = new_loc
 
         # Reset state
-        self.state = (self.player_info, self.wall_info, self.pit_info, self.win_info)
+        game_state = (self.player_info, self.wall_info, self.pit_info, self.win_info)
+        info = flatten_list_of_lists(game_state)
+        self.state = self.state_info(*info)
 
         # Get and return reward
         reward = self.get_reward()
@@ -113,11 +129,17 @@ class GridWorld(AbstractGame):
 
     def get_reward(self):
         if self.player_info == self.pit_info:
+            self.game_status = 'player loses'
             return -10
         elif self.player_info == self.win_info:
+            self.game_status = 'player wins'
             return 10
+        elif self.player_info == self.player_old_state:
+            return -5
         else:
-            return -1
+            # Return distance from win (player looks at screen so i think this is fare)
+            return -(math.sqrt((self.player_info.x - self.win_info.x)**2 + (self.player_info.y - self.win_info.y)**2))
+            #return -1
 
 
 if __name__ == "__main__":
