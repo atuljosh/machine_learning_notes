@@ -75,8 +75,9 @@ class GridWorld(AbstractGame):
         x, y = 3,3 #self.random_unsed_coordinates(0, 4)
         self.win_info = self.coordinates(x, y)
         game_state = (self.player_info, self.wall_info, self.pit_info, self.win_info)
-        info = flatten_list_of_lists(game_state)
-        self.state = self.state_info(*info)
+        # info = flatten_list_of_lists(game_state)
+        # self.state = self.state_info(*info)
+        self.state = game_state
         self.game_status = 'in process'
 
     def display_grid(self):
@@ -120,8 +121,9 @@ class GridWorld(AbstractGame):
 
         # Reset state
         game_state = (self.player_info, self.wall_info, self.pit_info, self.win_info)
-        info = flatten_list_of_lists(game_state)
-        self.state = self.state_info(*info)
+        #info = flatten_list_of_lists(game_state)
+        #self.state = self.state_info(*info)
+        self.state = game_state
 
         # Get and return reward
         reward = self.get_reward()

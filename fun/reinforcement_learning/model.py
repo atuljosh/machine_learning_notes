@@ -71,10 +71,9 @@ class Model(object):
             # TODO Need to pass model path and throw finish somewhere to store the final model
             self.model_path = self.base_folder_name + "/model.vw"
             self.cache_path = self.base_folder_name + "/temp.cache"
-            # self.model = pyvw.vw(quiet=True, l2=0.00000001, loss_function='squared', passes=1, holdout_off=True, cache=self.cache_path,
-            #                      f=self.model_path,  lrq='sdsd7', lrqdropout=True)
+            #self.f1 = open(self.base_folder_name + "/train.vw", 'a')
             self.model = pyvw.vw(quiet=True, l2=0.00000001, loss_function='squared', passes=1, holdout_off=True, cache=self.cache_path,
-                                 f=self.model_path) #,  lrq='sdsd7', lrqdropout=True)
+                                 f=self.model_path,  lrq='sdsd14', lrqdropout=True)
 
     def remove_vw_files(self):
         if os.path.isfile(self.cache_path): os.remove(self.cache_path)
@@ -126,8 +125,16 @@ class Model(object):
                 # Decision pixel tuple is our design matrix
                 # TODO Do interaction via vw namespaces may be?
                 # Right now features are simply state X decision interaction + single interaction feature representing state
-                all_features = ['-'.join([i, str(j), decision_taken]) for i, j in zip(state._fields, state)]
-                all_features_with_interaction = all_features + ['_'.join(all_features)]
+                try:
+                    _ = len(state[0])
+                    all_features = ['feature' + str(idx) + '-' + '-'.join(str(x) for x in obs) + '-' + decision_taken for idx, obs in enumerate(state)]
+
+                # Hmm design matrix for blackjack is different
+                except TypeError:
+                    all_features = ['-'.join([i, str(j), decision_taken]) for i, j in zip(state._fields, state)]
+
+                tag = '_'.join(all_features)
+                all_features_with_interaction = all_features + [tag]
 
                 if self.model_class == 'scikit':
                     tr = {fea_value: 1 for fea_value in all_features_with_interaction}
@@ -137,9 +144,9 @@ class Model(object):
                 elif self.model_class == 'vw' or self.model_class == 'vw_python':
                     input = " ".join(all_features_with_interaction)
                     if reward:
-                        output = str(reward) + " " + '-'.join([str(state[0]), str(state[1]), decision_taken])
+                        output = str(reward) #+ " " + tag
                         fv = output + " |sd " + input + '\n'
-                        # self.f1.write(fv)
+                        #self.f1.write(fv)
                     else:
                         fv = " |sd " + input + '\n'
 
@@ -191,7 +198,7 @@ class Model(object):
             # TODO Or just use scikit learn interface
             # vw = pyvw.vw(quiet=True, lrq='aa7', lrqdropout=True, l2=0.01)
             # Let's use vw as good'old sgd solver
-            for _ in xrange(5):
+            for _ in xrange(10):
                 random.shuffle(X)
                 res = [fv.learn() for fv in X]
             self.exists = True
