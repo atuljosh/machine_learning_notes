@@ -174,4 +174,3 @@ class BlackJack(game.AbstractGame):
         all_decision_states_tuple = tuple(all_decision_states)
         return all_decision_states_tuple, reward
 
-

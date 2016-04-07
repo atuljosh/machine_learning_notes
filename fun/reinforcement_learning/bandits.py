@@ -46,11 +46,15 @@ class BanditAlgorithm(object):
 
 
     def return_action_based_on_greedy_policy(self, state, model):
-        result=()
-        q_value_table = self.return_decision_reward_tuples(state, model)
-        # Store policy learned so far
-        if q_value_table:
-            result = self.return_decision_with_max_reward(q_value_table)
+
+        if model.exists:
+            result=()
+            q_value_table = self.return_decision_reward_tuples(state, model)
+            # Store policy learned so far
+            if q_value_table:
+                result = self.return_decision_with_max_reward(q_value_table)
+        else:
+            result = (random.choice(model.all_possible_decisions), 0)
 
         return result
 

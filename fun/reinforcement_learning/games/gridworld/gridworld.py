@@ -66,14 +66,16 @@ class GridWorld(AbstractGame):
          - all we know is : there are 4 things on the screen.. lets use sparse representation
         """
         # TODO Randomize
-        x, y = 0,2 #self.random_unsed_coordinates(0, 4)
-        self.player_info = self.coordinates(x, y)
-        x, y = 1,3 #self.random_unsed_coordinates(0, 4)
-        self.wall_info = self.coordinates(x, y)
-        x, y = 2,3#self.random_unsed_coordinates(0, 4)
-        self.pit_info = self.coordinates(x, y)
-        x, y = 3,3 #self.random_unsed_coordinates(0, 4)
-        self.win_info = self.coordinates(x, y)
+        # x, y = 0,2
+        # self.player_info = self.coordinates(x, y)
+        # x, y = 1,3
+        # self.wall_info = self.coordinates(x, y)
+        # x, y = 2,3
+        # self.pit_info = self.coordinates(x, y)
+        # x, y = 3,3
+        # self.win_info = self.coordinates(x, y)
+        random_coors = [self.coordinates(i,j) for i,j in zip(random.sample(xrange(0,4), 4), [random.randint(0,4) for _ in xrange(4)])]
+        self.player_info, self.wall_info, self.pit_info, self.win_info = random_coors
         game_state = (self.player_info, self.wall_info, self.pit_info, self.win_info)
         # info = flatten_list_of_lists(game_state)
         # self.state = self.state_info(*info)
@@ -140,8 +142,8 @@ class GridWorld(AbstractGame):
             return -5
         else:
             # Return distance from win (player looks at screen so i think this is fare)
-            return -(math.sqrt((self.player_info.x - self.win_info.x)**2 + (self.player_info.y - self.win_info.y)**2))
-            #return -1
+            #return -(math.sqrt((self.player_info.x - self.win_info.x)**2 + (self.player_info.y - self.win_info.y)**2))
+            return -1
 
 
 if __name__ == "__main__":

@@ -5,10 +5,11 @@ from games.gridworld.gridworld import GridWorld
 import pandas as pd
 import random
 import time
+import cPickle as pickle
 
 
 # TODO : 2) Implement Q learning and SARSA
-# TODO:  3) Implement and see how gridworld works
+# TODO:  3) Implement eligibility traces and see how gridworld works
 
 import cProfile
 from line_profiler import LineProfiler
@@ -89,7 +90,7 @@ def train_reinforcement_learning_strategy(num_sims=1, game_obs='blackjack', mode
 
 
 # TODO New function for training reinforcement strategy
-# TODO SUPER SLOW - FIND OUT WHAT IS CAUSING AN ISSUE
+# TODO Implement eligibility traces
 #@do_profile
 def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackjack', model_class='lookup_table',algo='q_learning' ):
     # Initialize model
@@ -98,12 +99,12 @@ def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackja
 
     model = Model({'class': model_class, 'base_folder_name': game_obs.base_folder_name})
     model.initialize()
-    epsilon = 0.2
+    epsilon = 0.4
     banditAlgorithm = BanditAlgorithm(params=epsilon)
     replay = []
     buffer = 500
     batchsize = 100
-    gamma = 0.5
+    gamma = 0.9
     h=0
 
     model.all_possible_decisions = game_obs.all_possible_decisions
@@ -114,12 +115,14 @@ def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackja
         banditAlgorithm.params = epsilon
         move = 0
 
+        print("Game #: %s" % (_,))
+
         # TODO This assumes we have a dumb model when we initialize
         while game_obs.game_status == 'in process':
             move += 1
 
             # Let's start new game if after 10 moves game doesn't end
-            if move > 10:
+            if move > 20:
                 break
 
             model.buffer += 1
@@ -182,9 +185,8 @@ def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackja
                     # TODO Instead of killing entire buffer we can keep a few and kill only the subset
                     model.clean_buffer()
 
-                print("Game #: %s" % (_,))
-
             # TODO Check for terminal state
+        print game_obs.game_status + " in " + str(move) + " moves"
         if epsilon > 0.1:  # decrement epsilon over time
             epsilon -= (1.0 / epochs)
 
@@ -195,7 +197,86 @@ def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackja
     return banditAlgorithm.policy, model
 
 
-def train_reinforcement_strategy_temporal_difference_without_ex_replay(epochs=1, game_obs='blackjack', model_class='lookup_table',algo='q_learning' ):
+def comeplete_n_steps_and_do_eligibility_traces(game_obs, banditAlgorithm, model, gamma, steps=1, algo='Q'):
+
+        history={}
+        old_state = game_obs.state
+        action, reward_estimate = banditAlgorithm.select_decision_given_state(game_obs.state, model,
+                                                                                                    algorithm='epsilon-greedy')
+        reward = game_obs.play(action)
+        history[0] = (old_state, action, reward)
+        moves = 0
+
+        # Do n steps based on whichever algo, record sequence of steps, get to the terminal step and get reward
+        for step in xrange(1, steps+1):
+
+            new_state = game_obs.state
+            # Check if in terminal state
+            if game_obs.game_status == 'in process':
+                # Get Q value table (for q learning)
+                if algo=='Q':
+                    result = banditAlgorithm.return_action_based_on_greedy_policy(new_state, model)
+                    future_action, future_reward_estimate = result
+
+                elif algo == 'sarsa':
+                    result = banditAlgorithm.select_decision_given_state(new_state, model,
+                                                                                    algorithm='epsilon-greedy')
+                    future_action, future_reward_estimate = result
+
+                # Take action, record reward, new state
+                future_reward = game_obs.play(future_action)
+
+                # Store current step
+                history[step] = (new_state, future_action, future_reward)
+                moves = step-1
+            else:
+                moves = step-1
+                break
+
+        # Based on the (hopefully) terminal state reward, update rewards for all earlier states
+        # history = {backstep-1: (history[backstep-1][0], history[backstep-1][1], history[backstep-1][2] + gamma**backstep * history[backstep][2])
+        #            for backstep in range(moves, 0, -1)
+        #            }
+
+        for backstep in range(moves, 0, -1):
+            updated_reward_for_prev_state = history[backstep-1][2] + gamma**backstep * history[backstep][2]
+            history[backstep-1] = (history[backstep-1][0], history[backstep-1][1], updated_reward_for_prev_state)
+
+            # We can create design matrix in the same loop maan
+            state, action, reward = history[backstep]
+            X_new, y_new = model.return_design_matrix((state, action), reward)
+            if model.model_class != 'lookup_table':
+                model.X.append(X_new)
+                model.y.append(y_new)
+            else:
+                model.fit([X_new], y_new)
+
+        # # Generate and store design matrix
+        # for step, action_state_reward in history.iteritems():
+        #     state, action, reward = action_state_reward
+        #     X_new, y_new = model.return_design_matrix((state, action), reward)
+        #
+        #     if model.model_class != 'lookup_table':
+        #         model.X.append(X_new)
+        #         model.y.append(y_new)
+        #     else:
+        #         model.fit([X_new], y_new)
+
+        ## TODO Fit model -- may be this can be a separate step?
+        # TODO We should retrain in every single epoch with subset of old samples
+        # TODO Implement experience-replay
+        if model.model_class != 'lookup_table':
+            model.fit(model.X, model.y)
+
+            # TODO Basically instead of cleaning buffer we can just overwrite INSTEAD OF appending above!!
+            # TODO THAT IS MY EXPERIENCE REPLAY
+            #model.clean_buffer()
+
+        # Return final updated (state, action, updated_reward) tuples
+        return model
+
+
+def train_reinforcement_strategy_temporal_difference_eligibility_trace(epochs=1, game_obs='blackjack', model_class='lookup_table',algo='q_learning' ):
     # Initialize model
 
     start_time = time.time()
@@ -205,7 +286,6 @@ def train_reinforcement_strategy_temporal_difference_without_ex_replay(epochs=1,
     epsilon = 0.2
     banditAlgorithm = BanditAlgorithm(params=epsilon)
     gamma = 0.9
-    h=0
 
     model.all_possible_decisions = game_obs.all_possible_decisions
 
@@ -215,55 +295,12 @@ def train_reinforcement_strategy_temporal_difference_without_ex_replay(epochs=1,
         banditAlgorithm.params = epsilon
         move = 0
 
-        # TODO This assumes we have a dumb model when we initialize
-        while game_obs.game_status == 'in process':
-            move += 1
+        model = comeplete_n_steps_and_do_eligibility_traces(game_obs, banditAlgorithm, model, gamma, steps=100, algo='Q')
 
-            # Let's start new game if after 10 moves game doesn't end
-            if move > 10:
-                break
+        print("Game #: %s" % (_,))
 
-            model.buffer += 1
-            old_state = game_obs.state
-
-            # TODO Finish implement q value update using Bellman equation
-            best_known_decision, known_reward = banditAlgorithm.select_decision_given_state(game_obs.state, model,
-                                                                                            algorithm='epsilon-greedy')
-            # Play or make move to get to a new state and see reward
-            reward = game_obs.play(best_known_decision)
-            new_state = game_obs.state
-
-            if game_obs.game_status == 'in process' and model.exists: #non-terminal state
-                # Get q values for the new state, and then choose best action (a single step temporal difference q learning)
-                # Get value estimate for that best action and update EXISTING reward
-                if algo == 'q_learning':
-                    result = banditAlgorithm.return_action_based_on_greedy_policy(new_state, model)
-                    max_reward = result[1]
-                # elif algo == 'sarsa':
-                #     result = banditAlgorithm.select_decision_given_state(new_state_er, model,
-                #                                                                     algorithm='epsilon-greedy')
-                #     max_reward = game_obs.play(result[0])
-
-                if result:
-                    reward = (reward + (gamma * max_reward))
-
-            X_new, y_new = model.return_design_matrix((old_state, best_known_decision), reward)
-
-            if model.model_class != 'lookup_table':
-                model.X.append(X_new)
-                model.y.append(y_new)
-            else:
-                model.fit([X_new], y_new)
-
-            # We are retraining in every single epoch, but with some subset of all samples
-            if model.model_class != 'lookup_table' and model.buffer == 100:
-                model.fit(model.X, model.y)
-                model.buffer = 0
-                #model.clean_buffer()
-
-            print("Game #: %s" % (_,))
-
-            # TODO Check for terminal state
+        # TODO Check for terminal state
+        print game_obs.game_status
         if epsilon > 0.1:  # decrement epsilon over time
             epsilon -= (1.0 / epochs)
 
@@ -275,13 +312,18 @@ def train_reinforcement_strategy_temporal_difference_without_ex_replay(epochs=1,
 
 
 
-def test_policy(game_obs, model):
+def test_policy(game_obs, model=None):
     print "---------- Testing policy:-----------"
     banditAlgorithm = BanditAlgorithm(params=0.1)
     game_obs.initiate_game()
     print "Initial state:"
     print game_obs.state
     move = 1
+
+    # Unpickle if model obs not provided
+    if not model:
+        model = pickle.load(open(game_obs.base_folder_name + '/model_obs.pkl', mode='rb'))
+
     if model.model_class == 'vw_python':
         from vowpal_wabbit import pyvw
         model.model = pyvw.vw("--quiet -i {0}".format(model.model_path))
@@ -298,7 +340,7 @@ def test_policy(game_obs, model):
             print "Too many moves"
             break
 
-if __name__ == "__main__":
+#if __name__ == "__main__":
 
     # If we want complete game episodes
     # blackjack = BlackJack()
@@ -315,14 +357,18 @@ if __name__ == "__main__":
     # print policy_Q_score
 
 ## *** ## Now temporal difference learning
-    # blackjack = BlackJack()
-    gridworld = GridWorld()
+    ## Blackjack implementation seems broken
+    # TODO Fix blackjack implementation (no need for lrq or lrq dropout.. without those things look fine i guess)
+    # TODO Q values look funcky for blackjack
+    #blackjack = BlackJack()
+    #gridworld = GridWorld()
     #policy, model = train_reinforcement_strategy_temporal_difference(epochs=50000, game_obs=blackjack, model_class='lookup_table')
     #policy, model = train_reinforcement_strategy_temporal_difference(epochs=500, game_obs=blackjack, model_class='scikit')
     #policy, model = train_reinforcement_strategy_temporal_difference(epochs=2000, game_obs=blackjack, model_class='vw')
     #policy, model = train_reinforcement_strategy_temporal_difference(epochs=5000, game_obs=blackjack, model_class='vw_python')
 
-    policy, model = train_reinforcement_strategy_temporal_difference(epochs=500, game_obs=gridworld, model_class='vw_python')
+    # Gridworld with 20k seems good one
+    #policy, model = train_reinforcement_strategy_temporal_difference(epochs=2000, game_obs=gridworld, model_class='vw_python')
     #policy, model = train_reinforcement_strategy_temporal_difference_without_ex_replay(epochs=500, game_obs=gridworld, model_class='vw_python')
 
     # pd = pd.DataFrame(policy).T
@@ -331,6 +377,6 @@ if __name__ == "__main__":
     # print policy_Q_table
     # policy_Q_score = pd.pivot('player_value', 'dealer_value')['score']
     # print policy_Q_score
-    #
-    #test_policy(blackjack, model)
-    test_policy(gridworld, model)
+    # #
+    # test_policy(blackjack)
+    #test_policy(gridworld)

@@ -8,11 +8,13 @@ from tempfile import NamedTemporaryFile
 import sys
 from vowpal_wabbit import pyvw
 import random
+import cPickle as pickle
 from line_profiler import LineProfiler
 
 # TODO Implement LRQ and LRQ dropout (I don't think it is doing the right thing)
 # TODO With -lrq now it is very slow
-#
+# TODO Check design matrix cache working
+# TODO Check pickling / vw_model storing etc.
 
 def do_profile(func):
     def profiled_func(*args, **kwargs):
@@ -41,8 +43,14 @@ class Model(object):
         self.exists = False
 
     def finish(self):
+        "Let's pickle only if we are running vw"
         if self.model_class == 'vw_python':
             self.model.finish()
+            # Want python object for later use
+            self.model = None
+            self.design_matrix_cache = {}
+            with open(self.base_folder_name + '/model_obs.pkl', mode='wb') as model_file:
+                pickle.dump(self, model_file)
 
     def initialize(self):
         if self.model_class == 'scikit':
@@ -73,7 +81,7 @@ class Model(object):
             self.cache_path = self.base_folder_name + "/temp.cache"
             #self.f1 = open(self.base_folder_name + "/train.vw", 'a')
             self.model = pyvw.vw(quiet=True, l2=0.00000001, loss_function='squared', passes=1, holdout_off=True, cache=self.cache_path,
-                                 f=self.model_path,  lrq='sdsd14', lrqdropout=True)
+                                 f=self.model_path)#,  lrq='sdsd8', lrqdropout=True)
 
     def remove_vw_files(self):
         if os.path.isfile(self.cache_path): os.remove(self.cache_path)
@@ -116,9 +124,10 @@ class Model(object):
             return decision_state, reward
 
         else:
-
-            if decision_state in self.design_matrix_cache:
-                fv, reward = self.design_matrix_cache[decision_state]
+            train_test_mode = 'train' if reward else 'test'
+            cache_key = (decision_state, train_test_mode)
+            if cache_key in self.design_matrix_cache:
+                fv, reward = self.design_matrix_cache[cache_key]
 
             else:
                 state, decision_taken = decision_state
@@ -154,9 +163,10 @@ class Model(object):
                         fv = self.model.example(fv)
 
                 # Store only training examples
-                # TODO: pyvw still screwed up for cache
-                # if reward:
-                #     self.design_matrix_cache[decision_state] = (fv, reward)
+                # TODO: pyvw for blackjack is somehow still screwed up for cache
+                # TODO Something is messed here NEED TO FIX HOw COME ONLY blackjack fails?
+                if 'hit' not in self.all_possible_decisions:
+                    self.design_matrix_cache[cache_key] = (fv, reward)
 
             return fv, reward
 
@@ -195,10 +205,11 @@ class Model(object):
         elif self.model_class == 'vw_python':
             # TODO create example and fit
             # TODO Remember X is list of examples (not a single example) SO How to go about that?
-            # TODO Or just use scikit learn interface
+            # TODO Or just use Scott's awesome scikit learn interface
             # vw = pyvw.vw(quiet=True, lrq='aa7', lrqdropout=True, l2=0.01)
             # Let's use vw as good'old sgd solver
             for _ in xrange(10):
+                # May be shuffling not necessary here
                 random.shuffle(X)
                 res = [fv.learn() for fv in X]
             self.exists = True
