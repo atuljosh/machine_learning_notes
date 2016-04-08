@@ -74,7 +74,7 @@ class GridWorld(AbstractGame):
         # self.pit_info = self.coordinates(x, y)
         # x, y = 3,3
         # self.win_info = self.coordinates(x, y)
-        random_coors = [self.coordinates(i,j) for i,j in zip(random.sample(xrange(0,4), 4), [random.randint(0,4) for _ in xrange(4)])]
+        random_coors = [self.coordinates(i,j) for i,j in zip(random.sample(xrange(0,4), 4), [random.randint(0,3) for _ in xrange(0, 4)])]
         self.player_info, self.wall_info, self.pit_info, self.win_info = random_coors
         game_state = (self.player_info, self.wall_info, self.pit_info, self.win_info)
         # info = flatten_list_of_lists(game_state)

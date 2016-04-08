@@ -50,7 +50,7 @@ def test_training_TD_for_blackjack(model_class):
 def test_training_TD_for_gridworld(model_class, train=True):
     gridworld = GridWorld()
     if train:
-        policy, model = rl.train_reinforcement_strategy_temporal_difference(epochs=2000, game_obs=gridworld, model_class=model_class)
+        policy, model = rl.train_reinforcement_strategy_temporal_difference(epochs=50000, game_obs=gridworld, model_class=model_class)
     rl.test_policy(gridworld)
 
     # Record MSE for each epoch may be?
@@ -58,6 +58,7 @@ def test_training_TD_for_gridworld(model_class, train=True):
 
 
 # Test TD-lambda for gridworld
+# TODO For some reason eligibility traces doesn't work as expected
 def test_training_TD_lambda_for_gridworld(model_class, train=True):
     gridworld = GridWorld()
     if train:
@@ -70,5 +71,5 @@ if __name__ == "__main__":
     #policy, model = test_training_monte_carlo_for_blackjack(model_class='lookup_table')
     #policy, model = test_training_monte_carlo_for_blackjack(model_class='vw_python')
     #policy, model = test_training_TD_for_blackjack(model_class='vw_python')
-    #test_training_TD_for_gridworld(model_class='vw_python', train=False)
-    test_training_TD_lambda_for_gridworld(model_class='vw_python', train=True)
+    test_training_TD_for_gridworld(model_class='vw_python', train=True)
+    #test_training_TD_lambda_for_gridworld(model_class='vw_python', train=False)

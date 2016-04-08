@@ -45,8 +45,11 @@ class Model(object):
     def finish(self):
         "Let's pickle only if we are running vw"
         if self.model_class == 'vw_python':
-            self.model.finish()
             # Want python object for later use
+            self.X = [ex.finish() for ex in self.X]
+            self.model.finish()
+            self.X = None
+            self.y = None
             self.model = None
             self.design_matrix_cache = {}
             with open(self.base_folder_name + '/model_obs.pkl', mode='wb') as model_file:
@@ -81,7 +84,7 @@ class Model(object):
             self.cache_path = self.base_folder_name + "/temp.cache"
             #self.f1 = open(self.base_folder_name + "/train.vw", 'a')
             self.model = pyvw.vw(quiet=True, l2=0.00000001, loss_function='squared', passes=1, holdout_off=True, cache=self.cache_path,
-                                 f=self.model_path)#,  lrq='sdsd8', lrqdropout=True)
+                                 f=self.model_path,  lrq='sdsd7', lrqdropout=True)
 
     def remove_vw_files(self):
         if os.path.isfile(self.cache_path): os.remove(self.cache_path)
@@ -170,6 +173,7 @@ class Model(object):
 
             return fv, reward
 
+    #@do_profile
     def fit(self, X, y):
         if self.model_class == 'scikit':
             # X, y = self.shuffle_data(X, y)
@@ -210,7 +214,7 @@ class Model(object):
             # Let's use vw as good'old sgd solver
             for _ in xrange(10):
                 # May be shuffling not necessary here
-                random.shuffle(X)
+                #random.shuffle(X)
                 res = [fv.learn() for fv in X]
             self.exists = True
             #print 'done'

@@ -6,6 +6,7 @@ import pandas as pd
 import random
 import time
 import cPickle as pickle
+import numpy as np
 
 
 # TODO : 2) Implement Q learning and SARSA
@@ -90,7 +91,7 @@ def train_reinforcement_learning_strategy(num_sims=1, game_obs='blackjack', mode
 
 
 # TODO New function for training reinforcement strategy
-# TODO Implement eligibility traces
+# TODO Implement eligibility traces - SOMEHOW STILL THIS DOESN"T WORK AS EXPECTED
 #@do_profile
 def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackjack', model_class='lookup_table',algo='q_learning' ):
     # Initialize model
@@ -99,7 +100,7 @@ def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackja
 
     model = Model({'class': model_class, 'base_folder_name': game_obs.base_folder_name})
     model.initialize()
-    epsilon = 0.4
+    epsilon = 0.8
     banditAlgorithm = BanditAlgorithm(params=epsilon)
     replay = []
     buffer = 500
@@ -196,7 +197,7 @@ def train_reinforcement_strategy_temporal_difference(epochs=1, game_obs='blackja
 
     return banditAlgorithm.policy, model
 
-
+#@do_profile
 def comeplete_n_steps_and_do_eligibility_traces(game_obs, banditAlgorithm, model, gamma, steps=1, algo='Q'):
 
         history={}
@@ -206,6 +207,7 @@ def comeplete_n_steps_and_do_eligibility_traces(game_obs, banditAlgorithm, model
         reward = game_obs.play(action)
         history[0] = (old_state, action, reward)
         moves = 0
+        terminated = False
 
         # Do n steps based on whichever algo, record sequence of steps, get to the terminal step and get reward
         for step in xrange(1, steps+1):
@@ -228,26 +230,41 @@ def comeplete_n_steps_and_do_eligibility_traces(game_obs, banditAlgorithm, model
 
                 # Store current step
                 history[step] = (new_state, future_action, future_reward)
-                moves = step-1
             else:
-                moves = step-1
+
+                terminated = True
                 break
+
+            moves = step-1
 
         # Based on the (hopefully) terminal state reward, update rewards for all earlier states
         # history = {backstep-1: (history[backstep-1][0], history[backstep-1][1], history[backstep-1][2] + gamma**backstep * history[backstep][2])
         #            for backstep in range(moves, 0, -1)
         #            }
-
+        # TODO Backup only when you reach terminal step
+        # TODO DO not train for every single step.. train may be n times during an episode
         for backstep in range(moves, 0, -1):
-            updated_reward_for_prev_state = history[backstep-1][2] + gamma**backstep * history[backstep][2]
-            history[backstep-1] = (history[backstep-1][0], history[backstep-1][1], updated_reward_for_prev_state)
+            # Backup reward only if player won or lost
+            if terminated:
+                updated_reward_for_prev_state = history[backstep-1][2] + gamma**backstep * history[backstep][2]
+                history[backstep-1] = (history[backstep-1][0], history[backstep-1][1], updated_reward_for_prev_state)
 
             # We can create design matrix in the same loop maan
             state, action, reward = history[backstep]
             X_new, y_new = model.return_design_matrix((state, action), reward)
             if model.model_class != 'lookup_table':
-                model.X.append(X_new)
-                model.y.append(y_new)
+
+                # TODO Experience replay goes here (and also keep design matrix small and speed up training)
+                if len(model.X) < 5000:
+                    model.X.append(X_new)
+                    model.y.append(y_new)
+
+                else:
+                    rnd = np.random.randint(0, len(model.X)-1)
+                    model.X[rnd] = X_new
+                    model.y[rnd] = y_new
+                    #model.fit(model.X, model.y)
+
             else:
                 model.fit([X_new], y_new)
 
@@ -262,9 +279,7 @@ def comeplete_n_steps_and_do_eligibility_traces(game_obs, banditAlgorithm, model
         #     else:
         #         model.fit([X_new], y_new)
 
-        ## TODO Fit model -- may be this can be a separate step?
-        # TODO We should retrain in every single epoch with subset of old samples
-        # TODO Implement experience-replay
+        # May be train only once per episode
         if model.model_class != 'lookup_table':
             model.fit(model.X, model.y)
 
@@ -283,7 +298,7 @@ def train_reinforcement_strategy_temporal_difference_eligibility_trace(epochs=1,
 
     model = Model({'class': model_class, 'base_folder_name': game_obs.base_folder_name})
     model.initialize()
-    epsilon = 0.2
+    epsilon = 0.9
     banditAlgorithm = BanditAlgorithm(params=epsilon)
     gamma = 0.9
 
@@ -295,7 +310,7 @@ def train_reinforcement_strategy_temporal_difference_eligibility_trace(epochs=1,
         banditAlgorithm.params = epsilon
         move = 0
 
-        model = comeplete_n_steps_and_do_eligibility_traces(game_obs, banditAlgorithm, model, gamma, steps=100, algo='Q')
+        model = comeplete_n_steps_and_do_eligibility_traces(game_obs, banditAlgorithm, model, gamma, steps=40, algo='Q')
 
         print("Game #: %s" % (_,))
 
