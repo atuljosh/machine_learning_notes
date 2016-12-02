@@ -78,12 +78,16 @@ class SimpleSGD(object):
             hypothesis = self.sigmoid(linear_hypothesis)
             return hypothesis
 
+        if self.loss_fn == 'poisson':
+            hypothesis = np.log(linear_hypothesis)
+            return hypothesis
+
         elif self.loss_fn == 'squared':
             return linear_hypothesis
 
     def initialize_weights(self, m):
         # np.random.random((x.columns,))
-        self.w = np.random.random((m))
+        self.w = np.random.random((m)) / np.sqrt(m)
 
     def update_weights(self, gradient):
         # Either do not regularize intercept OR regularize to global mean
@@ -174,10 +178,10 @@ def test_model(lm, loss_fn, X_train, y_train, X_test, y_test):
 
 
 if __name__ == "__main__":
-    loss_fn = 'squared'
+    loss_fn = 'logistic'
     y, X = synthetic_data(1000, loss_fn)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42)
-    params_dict = {'loss_fn': loss_fn, 'learning_rate': 0.001, 'l2_regularization': 0.01, 'batch_size': 1, 'epochs': 100}
+    params_dict = {'loss_fn': loss_fn, 'learning_rate': 0.01, 'l2_regularization': 0.001, 'batch_size': 1, 'epochs': 1000}
     our_sgd = SimpleSGD(params_dict)
 
     print "our model:"
