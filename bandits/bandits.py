@@ -14,7 +14,6 @@ class BanditArm(object):
         - bernoulli arm (just 1/0 reward like a click or conversion)
         - binomial or poisson arm (prob of click or arrival rate)
         - normal or lognormal (value per click or value per conversion)
-
     """
     def __init__(self, true_params=None, prior_params=None):
 
@@ -31,26 +30,25 @@ class BanditArm(object):
         # Arm statistics / distribution parameter estimates
         self.trials = 0
         self.sample_mean = 0
-        self.upper_confidence_bound = 0
-        self.sample_variance = 0
-        self.quantity_used_for_arm_selection = 0
 
         # Prior beta distribution parameters, both 1 means uniform distribution
         if prior_params:
+            self.prior_distribution = prior_params.get('distribution', 'beta')
             self.prior_alpha = prior_params.get('alpha', 1) # Beta (for beta-binomial posterior)
             self.prior_beta = prior_params.get('beta', 1)   # Beta (for beta-binomial posterior)
             self.prior_mu = prior_params.get('mu', 1) # For normal-normal posterior
         else:
-            self.prior_alpha, self.prior_beta, self.prior_mu = 1, 1, 1
+            self.prior_alpha, self.prior_beta, self.prior_mu, self.prior_distribution = 1, 1, 1, 'beta'
 
     def update_trial_count_for_arm(self):
         self.trials += 1
 
-    def return_reward_for_trial(self):
+    def observe_reward_for_trial(self):
         """
         Observed reward will be based on true distribution of an arm
         e.g. bernoulli, binomial, poisson, normal, lognormal etc
         """
+        self.update_trial_count_for_arm()
         if self.true_distribution == 'bernoulli':
             return np.random.binomial(n=1, p=self.p)
 
@@ -59,6 +57,10 @@ class BanditArm(object):
         Compute simple Maximum likelihood estimate of reward
         For bernoulli, binomial, poisson and gaussian mle estimate of paramter is just sample mean: number_of_successes / number of trials
         Note: we are calculating running avg, (n-1)/n * old_estimate + 1/n * latest_reward
+
+        For contexual bandits, sample_mean estimate can be a linear (or whatever) function of features
+        Contexual bandits are powerful since features can share information i.e. you don't need to pull arm explicitely for learning its sample mean
+
         :param reward:
         :return:
         """
@@ -73,8 +75,8 @@ class BanditArm(object):
             This is really Chernoff-Hoeffding bound (http://jeremykun.com/2013/04/15/probabilistic-bounds-a-primer/)
             and hence the name upper_confidence_bound
         """
-        self.upper_confidence_bound = self.sample_mean + math.sqrt((2 * math.log(total_trials)) / self.trials)
-        return self.upper_confidence_bound
+        if self.true_distribution == 'bernoulli' or self.true_distribution == 'binomial':
+            return self.sample_mean + math.sqrt((2 * math.log(total_trials)) / self.trials) if self.trials > 0 else 0
 
     def update_sample_mean_map(self, reward):
         """
@@ -91,6 +93,15 @@ class BanditArm(object):
         self.sample_mean = self.prior_alpha / (self.prior_alpha + self.prior_beta)
         return
 
+    def sample_from_posterior_distribution(self):
+        """
+        If arm true distribution is bernoulli or binomial
+        prior distribution is beta, so sample from beta
+        :return:
+        """
+        if self.true_distribution == 'bernoulli' or self.true_distribution == 'binomial':
+            return np.random.beta(self.prior_alpha, self.prior_beta)
+
 
 class BanditPolicy(object):
     """
@@ -100,36 +111,40 @@ class BanditPolicy(object):
 
     def __init__(self, params=0):
         self.params = params
-        self.arms = []
+        self.arms = None
         self.total_trials = 0
 
-    def initialize_bandit_arms(self, known_arm_probabilities):
-        self.arms = [BanditArm(true_params={'distribution': 'bernoulli', 'p': prob}) for prob in known_arm_probabilities]
+    def initialize_policy_and_bandit_arms(self, arm_params):
+        arm_reward_distribution = arm_params.get('distribution', 'bernoulli')
+        self.arms = [BanditArm(true_params={'distribution': arm_reward_distribution, 'p': prob}) for prob in arm_params.get('known_arm_probabilities')]
+        self.total_trials = 0
         return
 
     @abstractmethod
-    def select_arm(self):
+    def select_and_return_best_arm(self):
         pass
 
     @abstractmethod
-    def update_arm_sample_mean(self, reward, arm):
+    def update_sample_mean_for_selected_arm(self, reward, arm):
         pass
 
-    # @abstractmethod
-    def modify_quantity_used_for_arm_selection(self, arm):
+    @abstractmethod
+    def return_selection_statistics_for_all_arms(self):
         pass
 
-    def test_algorithm(self, means, num_sims, horizon):
+    def return_idx_for_max_value(self, x):
+        return x.index(max(x))
+
+    def test_policy(self, means, num_sims, times):
         results = []
         for sim in xrange(num_sims):
-            self.initialize_bandit_arms(means)
-            for t in xrange(horizon):
+            self.initialize_policy_and_bandit_arms(means)
+
+            for t in xrange(times):
                 self.total_trials += 1
-                chosen_arm = self.select_arm()
-                reward = chosen_arm.return_reward_for_trial()
-                chosen_arm.update_trial_count_for_arm()
-                self.update_arm_sample_mean(reward, chosen_arm)
-                #self.modify_quantity_used_for_arm_selection(chosen_arm)
+                chosen_arm = self.select_and_return_best_arm()
+                reward = chosen_arm.observe_reward_for_trial()
+                self.update_sample_mean_for_selected_arm(reward, chosen_arm)
                 result = (self.params, sim, t, chosen_arm.p, reward)
                 results.append(result)
 
@@ -140,24 +155,18 @@ class EpsilonGreedy(BanditPolicy):
     """
     Simple epislon greedy
     """
-    def modify_quantity_used_for_arm_selection(self, arm):
-        """
-        Epsilon-greedy uses sample_mean for selection without modification
-        :param arm:
-        :return:
-        """
-        arm.quantity_used_for_arm_selection = arm.sample_mean
-        return
+    def return_selection_statistics_for_all_arms(self):
+        return [arm.sample_mean for arm in self.arms]
 
-    def select_arm(self):
+    def select_and_return_best_arm(self):
         if random.random() > self.params:
-            x = [arm.sample_mean for arm in self.arms]
-            max_idx = x.index(max(x))
+            x = self.return_selection_statistics_for_all_arms()
+            max_idx = self.return_idx_for_max_value(x)
             return self.arms[max_idx]
         else:
             return np.random.choice(self.arms)
 
-    def update_arm_sample_mean(self, reward, chosen_arm):
+    def update_sample_mean_for_selected_arm(self, reward, chosen_arm):
         chosen_arm.update_sample_mean_mle(reward)
         return
 
@@ -167,14 +176,19 @@ class SoftMax(BanditPolicy):
     Simple softmax / proportional sampling
     with annealing schedule
     """
+    def return_selection_statistics_for_all_arms(self):
+        temperature = self.compute_temperature()
+        exp_values = self.compute_exponentiated_value_estimates(temperature=temperature)
+        proportions = self.compute_proportions(exp_values)
+        return proportions
+
     def compute_temperature(self):
         if self.params:
             # simple softmax
             temp = self.params
         else:
             # Annealling softmax
-            t = self.total_trials + 1
-            temp = 1 / math.log(t + 0.00000001)
+            temp = 1 / math.log(self.total_trials + 0.00000001)
         return temp
 
     def compute_exponentiated_value_estimates(self, temperature):
@@ -193,14 +207,12 @@ class SoftMax(BanditPolicy):
                 return i
         return len(proportions)-1
 
-    def select_arm(self):
-        temperature = self.compute_temperature()
-        exp_values = self.compute_exponentiated_value_estimates(temperature=temperature)
-        proportions = self.compute_proportions(exp_values)
+    def select_and_return_best_arm(self):
+        proportions = self.return_selection_statistics_for_all_arms()
         chosen_arm_index = self.proportional_sampling(proportions)
         return self.arms[chosen_arm_index]
 
-    def update_arm_sample_mean(self, reward, chosen_arm):
+    def update_sample_mean_for_selected_arm(self, reward, chosen_arm):
         chosen_arm.update_sample_mean_mle(reward)
         return
 
@@ -209,17 +221,20 @@ class UCB1(BanditPolicy):
     """
     Simple UCB variant
     """
-    def select_arm(self):
+    def return_selection_statistics_for_all_arms(self):
+        return [arm.update_upper_confidence_bound(self.total_trials) for arm in self.arms]
+
+    def select_and_return_best_arm(self):
         # Make sure each arm gets picked at least once
         for arm in self.arms:
             if arm.trials == 0:
                 return arm
 
-        x = [arm.update_upper_confidence_bound(self.total_trials) for arm in self.arms]
-        max_idx = x.index(max(x))
+        x = self.return_selection_statistics_for_all_arms()
+        max_idx = self.return_idx_for_max_value(x)
         return self.arms[max_idx]
 
-    def update_arm_sample_mean(self, reward, chosen_arm):
+    def update_sample_mean_for_selected_arm(self, reward, chosen_arm):
         chosen_arm.update_sample_mean_mle(reward)
         return
 
@@ -230,25 +245,29 @@ class ThompsonSampling(BanditPolicy):
     # Choose arm such that, max reward, keep count of success and failuer
     # update beta params for each arm
     # continue
-    def select_arm(self):
+    def return_selection_statistics_for_all_arms(self):
+        return [arm.sample_from_posterior_distribution() for arm in self.arms]
+
+    def select_and_return_best_arm(self):
         """
         Select arm with max estimated map mean
         :return:
         """
-        samples = [np.random.beta(arm.prior_alpha, arm.prior_beta) for arm in self.arms]
-        max_id = samples.index(max(samples))
+        samples = self.return_selection_statistics_for_all_arms()
+        max_id = self.return_idx_for_max_value(samples)
         return self.arms[max_id]
 
-    def update_arm_sample_mean(self, reward, chosen_arm):
+    def update_sample_mean_for_selected_arm(self, reward, chosen_arm):
         chosen_arm.update_sample_mean_map(reward)
         return
 
 
 def run_bandit_algorithm_and_generate_results(policy_name, params=[], sim_nums=1000, times=250):
     random.seed(1)
-    known_arm_probabilities = [0.1, 0.1, 0.1, 0.1, 0.1, 0.9]
+    arm_params = {'distribution': 'bernoulli', 'known_arm_probabilities': [0.1, 0.1, 0.1, 0.1, 0.1, 0.9]}
     final = []
     params = params if params else [0]
+    policy = None
 
     for param in params:
         if policy_name == 'epsilon_greedy':
@@ -262,7 +281,7 @@ def run_bandit_algorithm_and_generate_results(policy_name, params=[], sim_nums=1
         elif policy_name == 'thompson_sampling':
             policy = ThompsonSampling()
 
-        results = policy.test_algorithm(known_arm_probabilities, sim_nums, times)
+        results = policy.test_policy(arm_params, sim_nums, times)
         final.extend(results)
 
     df = pd.DataFrame(final, columns=['epsilon', 'sim_nums', 'times', 'chosen_arms', 'rewards'])
@@ -274,6 +293,6 @@ def run_bandit_algorithm_and_generate_results(policy_name, params=[], sim_nums=1
 
 if __name__ == '__main__':
     t1 = time.time()
-    result_df = run_bandit_algorithm_and_generate_results(policy_name='epsilon_greedy', params=[0.1], sim_nums=1000, times=250)
+    result_df = run_bandit_algorithm_and_generate_results(policy_name='thompson_sampling', params=[0.1], sim_nums=1000, times=250)
     print result_df
     print "time taken:" + str(time.time()-t1)
