@@ -9,11 +9,13 @@ import numpy as np
 
 class BanditArm(object):
     """
-    Arm is just one possible control or decision configuration available to US
+    Arm is just one possible control or decision configuration available to us
+    (which arm to pick / which action to take)
     This can be a:
         - bernoulli arm (just 1/0 reward like a click or conversion)
         - binomial or poisson arm (prob of click or arrival rate)
         - normal or lognormal (value per click or value per conversion)
+        - contexual arm (where arm is actually combination of features)
     """
     def __init__(self, true_params=None, prior_params=None):
 
@@ -52,7 +54,7 @@ class BanditArm(object):
         if self.true_distribution == 'bernoulli':
             return np.random.binomial(n=1, p=self.p)
 
-    def update_sample_mean_mle(self, reward):
+    def update_sample_reward_mean_mle(self, reward):
         """
         Compute simple Maximum likelihood estimate of reward
         For bernoulli, binomial, poisson and gaussian mle estimate of paramter is just sample mean: number_of_successes / number of trials
@@ -60,6 +62,14 @@ class BanditArm(object):
 
         For contexual bandits, sample_mean estimate can be a linear (or whatever) function of features
         Contexual bandits are powerful since features can share information i.e. you don't need to pull arm explicitely for learning its sample mean
+        Also, features can be a combination of controllable features (e.g. attributes of arm) AND uncontrollable features (environmental attributes)
+        An example of this could be:
+            If an arm is which ad / news recommendation to show
+                - ad features: targeting, creative
+                - environmental_features: temporal
+            If an arm is different levels of bid, budget combination
+                - arm features: if you always want to bid up/down for certain ads, features of those ads, also ad can be a feature
+                - environmental: temporal
 
         :param reward:
         :return:
@@ -78,7 +88,7 @@ class BanditArm(object):
         if self.true_distribution == 'bernoulli' or self.true_distribution == 'binomial':
             return self.sample_mean + math.sqrt((2 * math.log(total_trials)) / self.trials) if self.trials > 0 else 0
 
-    def update_sample_mean_map(self, reward):
+    def update_sample_reward_mean_map(self, reward):
         """
         Compute beta-binomial posterior of reward
         (Beta is conjugate prior of bernoulli/binomial)
@@ -125,7 +135,7 @@ class BanditPolicy(object):
         pass
 
     @abstractmethod
-    def update_sample_mean_for_selected_arm(self, reward, arm):
+    def update_sample_mean_reward_for_selected_arm(self, reward, arm):
         pass
 
     @abstractmethod
@@ -144,7 +154,7 @@ class BanditPolicy(object):
                 self.total_trials += 1
                 chosen_arm = self.select_and_return_best_arm()
                 reward = chosen_arm.observe_reward_for_trial()
-                self.update_sample_mean_for_selected_arm(reward, chosen_arm)
+                self.update_sample_mean_reward_for_selected_arm(reward, chosen_arm)
                 result = (self.params, sim, t, chosen_arm.p, reward)
                 results.append(result)
 
@@ -166,8 +176,8 @@ class EpsilonGreedy(BanditPolicy):
         else:
             return np.random.choice(self.arms)
 
-    def update_sample_mean_for_selected_arm(self, reward, chosen_arm):
-        chosen_arm.update_sample_mean_mle(reward)
+    def update_sample_mean_reward_for_selected_arm(self, reward, chosen_arm):
+        chosen_arm.update_sample_reward_mean_mle(reward)
         return
 
 
@@ -212,8 +222,8 @@ class SoftMax(BanditPolicy):
         chosen_arm_index = self.proportional_sampling(proportions)
         return self.arms[chosen_arm_index]
 
-    def update_sample_mean_for_selected_arm(self, reward, chosen_arm):
-        chosen_arm.update_sample_mean_mle(reward)
+    def update_sample_mean_reward_for_selected_arm(self, reward, chosen_arm):
+        chosen_arm.update_sample_reward_mean_mle(reward)
         return
 
 
@@ -234,8 +244,8 @@ class UCB1(BanditPolicy):
         max_idx = self.return_idx_for_max_value(x)
         return self.arms[max_idx]
 
-    def update_sample_mean_for_selected_arm(self, reward, chosen_arm):
-        chosen_arm.update_sample_mean_mle(reward)
+    def update_sample_mean_reward_for_selected_arm(self, reward, chosen_arm):
+        chosen_arm.update_sample_reward_mean_mle(reward)
         return
 
 
@@ -257,8 +267,8 @@ class ThompsonSampling(BanditPolicy):
         max_id = self.return_idx_for_max_value(samples)
         return self.arms[max_id]
 
-    def update_sample_mean_for_selected_arm(self, reward, chosen_arm):
-        chosen_arm.update_sample_mean_map(reward)
+    def update_sample_mean_reward_for_selected_arm(self, reward, chosen_arm):
+        chosen_arm.update_sample_reward_mean_map(reward)
         return
 
 
@@ -289,6 +299,26 @@ def run_bandit_algorithm_and_generate_results(policy_name, params=[], sim_nums=1
     grouped_df['prob_of_best_arm'] = grouped_df['rewards'] / sim_nums
 
     return grouped_df
+
+
+def generate_random_context():
+    """
+    (context synonymous with state), above we are only considering (stateless) actions
+    (also we are assuming discrete action, but it can be continuous)
+    If only action + instantaneous reward (simple vanilla MLB)
+    If state + action + instantaneous reward (contexual MLB)
+    If state + action + long term reward (full RL problem with credit assignment and delayed reward)
+
+    A single ad is an arm, combination of targeting / creative / temporal features is a context
+    A single bid on ad is an arm (too many possibilities there), combination of bid / targeting / creative / temporal features is a context
+    Vanilla MLB, sample_mean estimate is non-parametric (ignore state or context)
+    Contexual MLB, sample mean estimate is a parametric function of arm and context features! (state + action)
+    That way, even if you don't pull an arm, you can still estimate and learn about it
+
+    For a given ad, based on contexual features and sampled coefficients, bid value (TS) or value + sd (UCB) or epsilon greedy for ad selection or proportion sample
+    With TS or UCB, exploration is achieved via bidding high based on uncertainty (as opposed to simple selection)
+    """
+    pass
 
 
 if __name__ == '__main__':
