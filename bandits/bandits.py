@@ -1,4 +1,4 @@
-from __future__ import division
+
 from abc import ABCMeta, abstractmethod
 import random
 import pandas as pd
@@ -15,7 +15,7 @@ class BanditArm(object):
         - bernoulli arm (just 1/0 reward like a click or conversion)
         - binomial or poisson arm (prob of click or arrival rate)
         - normal or lognormal (value per click or value per conversion)
-        - contexual arm (where arm is actually combination of features)
+        - contextual arm (where arm is actually combination of features)
     """
     def __init__(self, true_params=None, prior_params=None):
 
@@ -27,7 +27,7 @@ class BanditArm(object):
             self.mu = true_params.get('mu', 0.5) # normal
             self.lamb = true_params.get('lamb', 0.5) # poisson
         else:
-            print 'CANNOT PROCEED, Need known arm distributions to proceed'
+            print('CANNOT PROCEED, Need known arm distributions to proceed')
 
         # Arm statistics / distribution parameter estimates
         self.trials = 0
@@ -82,7 +82,7 @@ class BanditArm(object):
         """
             Compute uncertainty estimate for each arm and update value estimate by mean + uncertainty
             uncertainty estimate = math.sqrt((2*math.log(total_counts))/arm.count)
-            This is really Chernoff-Hoeffding bound (http://jeremykun.com/2013/04/15/probabilistic-bounds-a-primer/)
+            This is really Chernoff-Hoeffding bound (https://jeremykun.com/2013/10/28/optimism-in-the-face-of-uncertainty-the-ucb1-algorithm/)
             and hence the name upper_confidence_bound
         """
         if self.true_distribution == 'bernoulli' or self.true_distribution == 'binomial':
@@ -113,11 +113,10 @@ class BanditArm(object):
             return np.random.beta(self.prior_alpha, self.prior_beta)
 
 
-class BanditPolicy(object):
+class BanditPolicy(object, metaclass=ABCMeta):
     """
     Abstract bandit algorithm
     """
-    __metaclass__ = ABCMeta
 
     def __init__(self, params=0):
         self.params = params
@@ -147,10 +146,10 @@ class BanditPolicy(object):
 
     def test_policy(self, means, num_sims, times):
         results = []
-        for sim in xrange(num_sims):
+        for sim in range(num_sims):
             self.initialize_policy_and_bandit_arms(means)
 
-            for t in xrange(times):
+            for t in range(times):
                 self.total_trials += 1
                 chosen_arm = self.select_and_return_best_arm()
                 reward = chosen_arm.observe_reward_for_trial()
@@ -211,7 +210,7 @@ class SoftMax(BanditPolicy):
     def proportional_sampling(self, proportions):
         rand = random.random()
         cum_prob = 0
-        for i in xrange(len(proportions)):
+        for i in range(len(proportions)):
             cum_prob += proportions[i]
             if cum_prob > rand:
                 return i
@@ -295,8 +294,8 @@ def run_bandit_algorithm_and_generate_results(policy_name, params=[], sim_nums=1
         final.extend(results)
 
     df = pd.DataFrame(final, columns=['epsilon', 'sim_nums', 'times', 'chosen_arms', 'rewards'])
-    grouped_df = df.groupby(['epsilon', 'times']).sum()
-    grouped_df['prob_of_best_arm'] = grouped_df['rewards'] / sim_nums
+    grouped_df = pd.DataFrame(df.groupby(['epsilon', 'times'])['rewards'].sum(), columns=['rewards'])
+    grouped_df['avg_reward'] = grouped_df['rewards'] / sim_nums
 
     return grouped_df
 
@@ -323,6 +322,6 @@ def generate_random_context():
 
 if __name__ == '__main__':
     t1 = time.time()
-    result_df = run_bandit_algorithm_and_generate_results(policy_name='thompson_sampling', params=[0.1], sim_nums=1000, times=250)
-    print result_df
-    print "time taken:" + str(time.time()-t1)
+    result_df = run_bandit_algorithm_and_generate_results(policy_name='thompson_sampling', params=[0.1], sim_nums=100, times=250)
+    print(result_df)
+    print("time taken:" + str(time.time()-t1))
